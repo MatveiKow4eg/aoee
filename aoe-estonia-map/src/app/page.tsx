@@ -145,10 +145,12 @@ export default function Home() {
   const [isLoading, setIsLoading] = useState(true);
   const [isLoaded, setIsLoaded] = useState(false);
   const [hasEntered, setHasEntered] = useState(false);
+  const [isDetailsOpen, setIsDetailsOpen] = useState(false);
 
   const openBuildingCard = useCallback((tier: TierKey) => {
     setCardTier(tier);
     setIsBuildingCardOpen(true);
+    setIsDetailsOpen(false);
   }, []);
 
   const closeBuildingCard = useCallback(() => {
@@ -327,7 +329,48 @@ export default function Home() {
         container.on("pointerover", onOver);
         container.on("pointerout", onOut);
 
-        (sprite as any).on("pointertap", () => openBuildingCard(tier));
+        // Robust tap detection: open card on short tap regardless of zoom,
+        // do not open when it is an actual drag gesture.
+        let tapState: { down: boolean; sx: number; sy: number; t: number; moved: boolean } = {
+          down: false,
+          sx: 0,
+          sy: 0,
+          t: 0,
+          moved: false,
+        };
+
+        const onDown = (e: PIXI.FederatedPointerEvent) => {
+          tapState.down = true;
+          tapState.t = (typeof performance !== "undefined" ? performance.now() : Date.now());
+          tapState.sx = e.global.x;
+          tapState.sy = e.global.y;
+          tapState.moved = false;
+          container.cursor = "pointer";
+        };
+
+        const onMove = (e: PIXI.FederatedPointerEvent) => {
+          if (!tapState.down) return;
+          const dx = e.global.x - tapState.sx;
+          const dy = e.global.y - tapState.sy;
+          // ~9px threshold in screen pixels (stable at any zoom)
+          if (dx * dx + dy * dy > 81) tapState.moved = true;
+        };
+
+        const finishTap = (e: PIXI.FederatedPointerEvent) => {
+          if (!tapState.down) return;
+          const dt = (typeof performance !== "undefined" ? performance.now() : Date.now()) - tapState.t;
+          const isTap = !tapState.moved && dt < 350;
+          tapState.down = false;
+          if (isTap) {
+            openBuildingCard(tier);
+          }
+        };
+
+        container.on("pointerdown", onDown);
+        container.on("pointermove", onMove);
+        container.on("pointerup", finishTap);
+        container.on("pointerupoutside", finishTap);
+        container.on("pointercancel", () => { tapState.down = false; });
 
         container.addChild(sprite);
         return container;
@@ -469,7 +512,7 @@ export default function Home() {
   }, []);
 
   return (
-    <div style={{ height: "100vh", display: "flex", flexDirection: "column", overflow: "hidden" }}>
+    <div style={{ height: "100dvh", display: "flex", flexDirection: "column", overflow: "hidden" }}>
       {/* Loader / Enter overlay */}
       {!hasEntered && (
         <div
@@ -571,12 +614,12 @@ export default function Home() {
       )}
 
       {/* Canvas host */}
-      <div ref={hostRef} style={{ flex: 1, visibility: hasEntered ? "visible" : "hidden" }} />
+      <div ref={hostRef} className="aoe-canvasHost" style={{ flex: 1, visibility: hasEntered ? "visible" : "hidden" }} />
 
       {/* Building card modal (view-only) */}
       {isBuildingCardOpen && cardTier && (
         <div
-          onClick={closeBuildingCard}
+          onPointerDown={closeBuildingCard}
           style={{
             position: "fixed",
             inset: 0,
@@ -589,16 +632,19 @@ export default function Home() {
           }}
         >
           <div
-            onClick={(e) => e.stopPropagation()}
-            style={{
-              width: "min(760px, calc(100vw - 32px))",
-              background: "#0b1220",
-              color: "#f7f0df",
-              border: "1px solid #3a2a1a",
-              borderRadius: 12,
-              boxShadow: "0 12px 48px rgba(0,0,0,0.45)",
-              padding: 14,
-            }}
+          onPointerDown={(e) => e.stopPropagation()}
+          onClick={(e) => e.stopPropagation()}
+          style={{
+          width: "min(760px, calc(100vw - 32px))",
+          maxHeight: "min(90dvh, calc(100dvh - 32px))",
+          overflowY: "auto",
+          background: "#0b1220",
+          color: "#f7f0df",
+          border: "1px solid #3a2a1a",
+          borderRadius: 12,
+          boxShadow: "0 12px 48px rgba(0,0,0,0.45)",
+          padding: 14,
+          }}
           >
             <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10 }}>
               <div
@@ -644,7 +690,7 @@ export default function Home() {
               const avatar = avatarByPlayerId(playerId, playerRec);
 
               return (
-                <div style={{ display: "flex", gap: 12, alignItems: "flex-start" }}>
+                <div style={{ display: "flex", flexDirection: "column", gap: 12, alignItems: "center" }}>
                   {avatar ? (
                     <div
                       style={{
@@ -659,14 +705,14 @@ export default function Home() {
                       <img
                         src={avatar}
                         alt="avatar"
-                        style={{ width: 240, height: 240, objectFit: "cover", display: "block" }}
+                        style={{ width: "min(240px, 42vw)", height: "min(240px, 42vw)", objectFit: "cover", display: "block" }}
                       />
                     </div>
                   ) : (
                     <div
                       style={{
-                        width: 240,
-                        height: 240,
+                        width: "min(240px, 42vw)",
+                        height: "min(240px, 42vw)",
                         borderRadius: 28,
                         background: "rgba(255,255,255,0.06)",
                         border: "2px solid rgba(255,255,255,0.14)",
@@ -675,17 +721,49 @@ export default function Home() {
                     />
                   )}
 
-                  <div style={{ minWidth: 0, flex: 1 }}>
-                    {name && (
-                      <div style={{ fontWeight: 900, fontSize: 16 }} title={title ? `${name} — ${title}` : name}>
-                        {title ? `${name} — ${title}` : name}
-                      </div>
-                    )}
-                    {title && !name && <div style={{ fontWeight: 900, fontSize: 16 }}>{title}</div>}
-                    {note && (
-                      <div style={{ marginTop: 8, opacity: 0.9, lineHeight: 1.35, whiteSpace: "pre-wrap" }}>{note}</div>
-                    )}
+                  <div
+                    style={{
+                      fontWeight: 900,
+                      fontSize: 16,
+                      textAlign: "center",
+                      maxWidth: "100%",
+                      overflow: "hidden",
+                      textOverflow: "ellipsis",
+                      whiteSpace: "nowrap",
+                    }}
+                    title={name || title || ""}
+                  >
+                    {name || title || "(без имени)"}
                   </div>
+
+                  <button
+                    onClick={() => setIsDetailsOpen((v) => !v)}
+                    style={{
+                      padding: "10px 14px",
+                      borderRadius: 10,
+                      border: "1px solid #caa24d",
+                      background: "#2b1a12",
+                      color: "#f7f0df",
+                      cursor: "pointer",
+                      fontWeight: 900,
+                    }}
+                    title={isDetailsOpen ? "Скрыть детали" : "Показать детали"}
+                  >
+                    {isDetailsOpen ? "Скрыть детали" : "Показать детали"}
+                  </button>
+
+                  {isDetailsOpen && (
+                    <div style={{ width: "100%" }}>
+                      {title && (
+                        <div style={{ fontWeight: 800, fontSize: 14, opacity: 0.95, textAlign: "center", marginBottom: 8 }}>{title}</div>
+                      )}
+                      {note ? (
+                        <div style={{ opacity: 0.9, lineHeight: 1.45, whiteSpace: "pre-wrap", wordBreak: "break-word", overflowWrap: "anywhere" }}>{note}</div>
+                      ) : (
+                        <div style={{ opacity: 0.75, textAlign: "center" }}>(без описания)</div>
+                      )}
+                    </div>
+                  )}
                 </div>
               );
             })()}
