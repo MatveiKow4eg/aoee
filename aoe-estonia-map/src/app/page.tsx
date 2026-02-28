@@ -425,9 +425,9 @@ export default function Home() {
   }, []);
 
   return (
-    <div style={{ height: "100vh", display: "flex", flexDirection: "column" }}>
+    <div style={{ height: "100dvh", display: "flex", flexDirection: "column" }}>
       {/* Canvas host */}
-      <div ref={hostRef} style={{ flex: 1 }} />
+      <div ref={hostRef} className="aoe-canvasHost" />
 
       {/* Building card modal (view-only) */}
       {isBuildingCardOpen && cardTier && (
@@ -511,14 +511,14 @@ export default function Home() {
                       <img
                         src={avatar}
                         alt="avatar"
-                        style={{ width: 240, height: 240, objectFit: "cover", display: "block" }}
+                        style={{ width: "min(240px, 42vw)", height: "min(240px, 42vw)", objectFit: "cover", display: "block" }}
                       />
                     </div>
                   ) : (
                     <div
                       style={{
-                        width: 240,
-                        height: 240,
+                        width: "min(240px, 42vw)",
+                        height: "min(240px, 42vw)",
                         borderRadius: 28,
                         background: "rgba(255,255,255,0.06)",
                         border: "2px solid rgba(255,255,255,0.14)",

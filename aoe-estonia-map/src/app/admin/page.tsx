@@ -975,8 +975,8 @@ export default function AdminMapPage() {
   }, []);
 
   return (
-    <div style={{ height: "100vh", display: "flex", flexDirection: "column" }}>
-      <div ref={hostRef} style={{ flex: 1 }} />
+    <div style={{ height: "100dvh", display: "flex", flexDirection: "column" }}>
+      <div ref={hostRef} className="aoe-canvasHost" />
 
       {/* Roster button (bottom-right) */}
       <button
@@ -1299,8 +1299,8 @@ export default function AdminMapPage() {
                         src={avatar}
                         alt="avatar"
                         style={{
-                          width: 240,
-                          height: 240,
+                          width: "min(240px, 42vw)",
+                          height: "min(240px, 42vw)",
                           objectFit: "cover",
                           display: "block",
                         }}
@@ -1309,8 +1309,8 @@ export default function AdminMapPage() {
                   ) : (
                     <div
                       style={{
-                        width: 240,
-                        height: 240,
+                        width: "min(240px, 42vw)",
+                        height: "min(240px, 42vw)",
                         borderRadius: 28,
                         background: "rgba(255,255,255,0.06)",
                         border: "2px solid rgba(255,255,255,0.14)",
@@ -1531,13 +1531,13 @@ export default function AdminMapPage() {
             display: "flex",
             alignItems: "center",
             justifyContent: "center",
-            padding: 24,
+            padding: 16,
           }}
         >
-          <div style={{ position: "absolute", top: 16, left: 16, color: "#f7f0df", fontWeight: 800 }}>
+          <div style={{ position: "absolute", top: 12, left: 12, color: "#f7f0df", fontWeight: 800, fontSize: 14 }}>
             {previewTier}
           </div>
-          <div style={{ position: "absolute", top: 16, right: 16, color: "#f7f0df", opacity: 0.85 }}>
+          <div style={{ position: "absolute", top: 12, right: 12, color: "#f7f0df", opacity: 0.85, fontSize: 12 }}>
             отпустите, чтобы закрыть
           </div>
           {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -1546,7 +1546,7 @@ export default function AdminMapPage() {
             alt={previewTier}
             style={{
               maxWidth: "96vw",
-              maxHeight: "92vh",
+              maxHeight: "92dvh",
               width: "auto",
               height: "auto",
               objectFit: "contain",
@@ -1564,32 +1564,32 @@ export default function AdminMapPage() {
           onPointerUp={() => setPreviewAvatar(null)}
           onPointerCancel={() => setPreviewAvatar(null)}
           style={{
-            position: "fixed",
-            inset: 0,
-            zIndex: 4001,
-            background: "rgba(0,0,0,0.85)",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            padding: 24,
+          position: "fixed",
+          inset: 0,
+          zIndex: 4001,
+          background: "rgba(0,0,0,0.85)",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          padding: 16,
           }}
-        >
+          >
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
-            src={previewAvatar}
-            alt="avatar"
-            style={{
-              maxWidth: "96vw",
-              maxHeight: "92vh",
-              width: "auto",
-              height: "auto",
-              objectFit: "contain",
-              display: "block",
-              filter: "drop-shadow(0 12px 40px rgba(0,0,0,0.55))",
-            }}
+          src={previewAvatar}
+          alt="avatar"
+          style={{
+          maxWidth: "96vw",
+          maxHeight: "92dvh",
+          width: "auto",
+          height: "auto",
+          objectFit: "contain",
+          display: "block",
+          filter: "drop-shadow(0 12px 40px rgba(0,0,0,0.55))",
+          }}
           />
-        </div>
-      )}
+          </div>
+          )}
 
       {/* Assignment modal */}
       {isAssignModalOpen && selectedBuilding && (
