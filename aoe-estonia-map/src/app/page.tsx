@@ -75,7 +75,7 @@ type MapStatePayloadV1 = {
 // ========== Constants ==========
 
 const WORLD = { w: 3000, h: 1800, mapTextureVersion: 1 } as const;
-const MAP_URL = "/map/map_aoe.png";
+const MAP_URL = "/map/map_aoe.webp";
 
 const TIERS: TierKey[] = [
   "Замки",

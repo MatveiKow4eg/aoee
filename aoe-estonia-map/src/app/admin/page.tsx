@@ -5,6 +5,9 @@ import * as PIXI from "pixi.js";
 import { Viewport } from "pixi-viewport";
 import { debounce, loadMapState, saveMapState } from "../../lib/mapStateStore";
 
+// Disable createImageBitmap globally to avoid Chromium decode flakiness
+try { (PIXI as any).settings.CREATE_IMAGE_BITMAP = false; } catch {}
+
 // ========== Types ==========
 
 type TierKey =
@@ -74,7 +77,7 @@ type FirestoreMapStateV1 = {
 const AUTOSAVE_MS = 800;
 const ENABLE_AUTOSAVE = false;
 const WORLD = { w: 3000, h: 1800, mapTextureVersion: 1 } as const;
-const MAP_URL = "/map/map_aoe.png";
+const MAP_URL = "/map/map_aoe.webp";
 
 const TIERS: TierKey[] = [
   "Замки",
@@ -798,7 +801,41 @@ export default function AdminMapPage() {
 
       app.stage.addChild(viewport);
 
-      const mapTexture = await PIXI.Assets.load(MAP_URL);
+      // Ensure Assets decoding does not use createImageBitmap
+      try { await (PIXI.Assets as any).init?.({ preferCreateImageBitmap: false }); } catch {}
+
+      // Manual robust loader: fetch -> HTMLImageElement -> Texture (bypasses createImageBitmap)
+      const loadTextureWithImage = async (urls: string[]): Promise<PIXI.Texture> => {
+        let lastErr: any = null;
+        for (const u of urls) {
+          try {
+            const res = await fetch(u, { cache: "no-store" });
+            if (!res.ok) throw new Error(`http ${res.status}`);
+            const blob = await res.blob();
+            const url = URL.createObjectURL(blob);
+            const img: HTMLImageElement = await new Promise((resolve, reject) => {
+              const i = new Image();
+              i.onload = () => resolve(i);
+              i.onerror = () => reject(new Error("img-decode-failed"));
+              i.src = url;
+            });
+            // Avoid revoke glitches: let the URL live; browser will GC after nav
+            const tex = PIXI.Texture.from(img as any);
+            return tex;
+          } catch (e) {
+            lastErr = e;
+            continue;
+          }
+        }
+        throw lastErr ?? new Error("texture-load-failed");
+      };
+
+      const mapCandidates = [
+        MAP_URL,
+        `${MAP_URL}?v=${WORLD.mapTextureVersion}`,
+        `${MAP_URL}?ts=${Date.now()}`,
+      ];
+      const mapTexture = await loadTextureWithImage(mapCandidates);
       if (destroyed) return;
       const mapSprite = new PIXI.Sprite(mapTexture);
       mapSprite.x = 0;
@@ -944,14 +981,48 @@ export default function AdminMapPage() {
         container.on("pointerover", onOver);
         container.on("pointerout", onOut);
 
+        // Stable tap detection in screen pixels for opening card in Drag OFF mode
+        let tapState: { down: boolean; sx: number; sy: number; t: number; moved: boolean } = {
+          down: false,
+          sx: 0,
+          sy: 0,
+          t: 0,
+          moved: false,
+        };
+
+        const onDownTap = (e: PIXI.FederatedPointerEvent) => {
+          tapState.down = true;
+          tapState.t = (typeof performance !== "undefined" ? performance.now() : Date.now());
+          tapState.sx = e.global.x;
+          tapState.sy = e.global.y;
+          tapState.moved = false;
+        };
+        const onMoveTap = (e: PIXI.FederatedPointerEvent) => {
+          if (!tapState.down) return;
+          const dx = e.global.x - tapState.sx;
+          const dy = e.global.y - tapState.sy;
+          if (dx * dx + dy * dy > 81) tapState.moved = true; // ~9px
+        };
+        const onUpTap = () => {
+          if (!tapState.down) return;
+          const dt = (typeof performance !== "undefined" ? performance.now() : Date.now()) - tapState.t;
+          const isTap = !tapState.moved && dt < 350;
+          tapState.down = false;
+          if (!dragBuildingsRef.current && isTap) {
+            openBuildingCard(tier);
+          }
+        };
+        container.on("pointerdown", onDownTap);
+        container.on("pointermove", onMoveTap);
+        container.on("pointerup", onUpTap);
+        container.on("pointerupoutside", onUpTap);
+        container.on("pointercancel", () => { tapState.down = false; });
+
         // Click:
-        // - Drag OFF: open the building card (player info)
+        // - Drag OFF: short tap handled above
         // - Drag ON: select building for editing (keep sticky highlight)
         (sprite as any).on("pointertap", () => {
-          if (!dragBuildingsRef.current) {
-            openBuildingCard(tier);
-            return;
-          }
+          if (!dragBuildingsRef.current) return;
 
           setSelectedBuilding(tier);
           const currentScale = (payloadRef.current?.buildings[tier] as any)?.scale;
@@ -1395,7 +1466,7 @@ export default function AdminMapPage() {
       {/* Building card modal */}
       {isBuildingCardOpen && cardTier && (
         <div
-          onClick={closeBuildingCard}
+          onPointerDown={closeBuildingCard}
           style={{
             position: "fixed",
             inset: 0,
@@ -1408,6 +1479,7 @@ export default function AdminMapPage() {
           }}
         >
           <div
+            onPointerDown={(e) => e.stopPropagation()}
             onClick={(e) => e.stopPropagation()}
             style={{
               width: "min(760px, calc(100vw - 32px))",
