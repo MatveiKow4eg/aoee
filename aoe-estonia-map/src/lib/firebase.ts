@@ -13,27 +13,45 @@ const firebaseConfig = {
   measurementId: process.env.NEXT_PUBLIC_FIREBASE_MEASUREMENT_ID,
 } as const;
 
-function assertFirebaseConfig() {
-  const missing = Object.entries(firebaseConfig)
+const missingFirebaseKeys = () =>
+  Object.entries(firebaseConfig)
     .filter(([, v]) => !v)
     .map(([k]) => k);
 
-  if (missing.length) {
-    // eslint-disable-next-line no-console
-    console.warn(
-      "[Firebase] Missing env vars:",
-      missing.join(", "),
-      "(set NEXT_PUBLIC_FIREBASE_* in Vercel env vars / .env.local)"
-    );
-  }
+let warnedMissing = false;
+
+function warnMissingOnce(missing: string[]) {
+  if (warnedMissing) return;
+  warnedMissing = true;
+  // eslint-disable-next-line no-console
+  console.warn(
+    "[Firebase] Missing env vars:",
+    missing.join(", "),
+    "(set NEXT_PUBLIC_FIREBASE_* in Vercel env vars / .env.local)"
+  );
 }
 
-export function getFirebaseApp(): FirebaseApp {
+/**
+ * Returns Firebase app or null if config is missing.
+ * This allows the UI to work with local fallback data in environments without Firebase configured.
+ */
+export function getFirebaseApp(): FirebaseApp | null {
   if (getApps().length) return getApp();
-  assertFirebaseConfig();
+
+  const missing = missingFirebaseKeys();
+  if (missing.length) {
+    warnMissingOnce(missing);
+    return null;
+  }
+
   return initializeApp(firebaseConfig as any);
 }
 
-export function getDb(): Firestore {
-  return getFirestore(getFirebaseApp());
+/**
+ * Returns Firestore instance or null if Firebase is not configured.
+ */
+export function getDb(): Firestore | null {
+  const app = getFirebaseApp();
+  if (!app) return null;
+  return getFirestore(app);
 }

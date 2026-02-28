@@ -28,13 +28,8 @@ type FirestoreDoc = {
 };
 
 export async function loadMapState(): Promise<MapStatePayloadV1 | null> {
-  let db;
-  try {
-    db = getDb();
-  } catch (e) {
-    console.warn("[Firestore] getDb() failed", e);
-    return null;
-  }
+  const db = getDb();
+  if (!db) return null;
 
   try {
     const ref = doc(db, DOC_PATH);
