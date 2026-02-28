@@ -28,9 +28,11 @@ type FirestoreDoc = {
 };
 
 export async function loadMapState(): Promise<MapStatePayloadV1 | null> {
-  const db = getDb();
-  if (!db) {
-    console.warn("[Firestore] db is null (firebase not initialized?)");
+  let db;
+  try {
+    db = getDb();
+  } catch (e) {
+    console.warn("[Firestore] getDb() failed", e);
     return null;
   }
 

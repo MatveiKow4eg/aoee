@@ -1,9 +1,9 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import * as PIXI from "pixi.js";
 import { Viewport } from "pixi-viewport";
-import { debounce, loadMapState, saveMapState } from "../lib/mapStateStore";
+import { loadMapState } from "../lib/mapStateStore";
 
 // ========== Types ==========
 
@@ -35,6 +35,8 @@ type Rect = { x: number; y: number; w: number; h: number };
 
 type Owner = { name: string; clan?: string; note?: string };
 
+type PlayerRec = { name?: string; tier?: TierKey | ""; title?: string; desc?: string; avatar?: string };
+
 type MapStatePayloadV1 = {
   world: { w: number; h: number; mapTextureVersion: number };
   buildings: Record<
@@ -48,11 +50,14 @@ type MapStatePayloadV1 = {
       owner?: Owner;
     }
   >;
+  players?: Record<string, PlayerRec>;
+  meta?: {
+    tierNames?: Partial<Record<TierKey, string>>;
+  };
 };
 
 // ========== Constants ==========
 
-const AUTOSAVE_MS = 800;
 const WORLD = { w: 3000, h: 1800, mapTextureVersion: 1 } as const;
 const MAP_URL = "/map/map_aoe.png";
 
@@ -110,106 +115,27 @@ const DEFAULT_BUILDINGS: MapStatePayloadV1["buildings"] = {
   "Башня v4": { x: 2420, y: 700, zone: { x: 1580, y: 760, w: 820, h: 260 } },
 };
 
-// ========== Helpers ==========
-
-function clamp(n: number, min: number, max: number) {
-  return Math.max(min, Math.min(max, n));
-}
-
 // ========== Component ==========
 
 export default function Home() {
   const hostRef = useRef<HTMLDivElement | null>(null);
   const appRef = useRef<PIXI.Application | null>(null);
   const viewportRef = useRef<Viewport | null>(null);
-
   const payloadRef = useRef<MapStatePayloadV1 | null>(null);
 
-  const [isDirty, setIsDirty] = useState(false);
-  const [dragBuildings, setDragBuildings] = useState(false);
-  const dragBuildingsRef = useRef(false);
+  const [isBuildingCardOpen, setIsBuildingCardOpen] = useState(false);
+  const [cardTier, setCardTier] = useState<TierKey | null>(null);
+  const [dataVersion, setDataVersion] = useState(0);
 
-  const [selectedBuilding, setSelectedBuilding] = useState<TierKey | null>(null);
-  const selectedBuildingRef = useRef<TierKey | null>(null);
+  const openBuildingCard = useCallback((tier: TierKey) => {
+    setCardTier(tier);
+    setIsBuildingCardOpen(true);
+  }, []);
 
-  const [buildingScale, setBuildingScale] = useState(1);
-  const [buildingRotation, setBuildingRotation] = useState(0);
-
-  // Owner modal state
-  const [isOwnerModalOpen, setIsOwnerModalOpen] = useState(false);
-  const [ownerName, setOwnerName] = useState("");
-  const [ownerClan, setOwnerClan] = useState("");
-  const [ownerNote, setOwnerNote] = useState("");
-
-  const scheduleAutosave = useMemo(
-    () =>
-      debounce(() => {
-        const pl = payloadRef.current;
-        if (!pl) return;
-        if (!isDirty) return;
-        void saveMapState(pl as any);
-      }, AUTOSAVE_MS),
-    [isDirty]
-  );
-
-  useEffect(() => () => scheduleAutosave.cancel(), [scheduleAutosave]);
-
-  useEffect(() => {
-    dragBuildingsRef.current = dragBuildings;
-    const viewport = viewportRef.current;
-    if (viewport) {
-      if (dragBuildings) viewport.plugins.pause("drag");
-      else viewport.plugins.resume("drag");
-    }
-  }, [dragBuildings]);
-
-  useEffect(() => {
-    selectedBuildingRef.current = selectedBuilding;
-  }, [selectedBuilding]);
-
-  // Update scale live
-  useEffect(() => {
-    const tier = selectedBuildingRef.current;
-    if (!tier) return;
-
-    const pl = payloadRef.current;
-    if (pl) {
-      if (!pl.buildings[tier]) pl.buildings[tier] = { ...(DEFAULT_BUILDINGS as any)[tier] } as any;
-      (pl.buildings[tier] as any).scale = buildingScale;
-      setIsDirty(true);
-      scheduleAutosave();
-    }
-
-    const spritesByTier = (appRef.current as any)?.__buildingSpritesByTier as
-      | Partial<Record<TierKey, PIXI.Sprite>>
-      | undefined;
-    const sprite = spritesByTier?.[tier];
-    if (sprite) {
-      const baseScale = (sprite as any).__baseScale ?? 1;
-      const nextScale = baseScale * buildingScale;
-      sprite.scale.set(nextScale);
-    }
-  }, [buildingScale, scheduleAutosave]);
-
-  // Update rotation live
-  useEffect(() => {
-    const tier = selectedBuildingRef.current;
-    if (!tier) return;
-
-    const pl = payloadRef.current;
-    if (pl) {
-      if (!pl.buildings[tier]) pl.buildings[tier] = { ...(DEFAULT_BUILDINGS as any)[tier] } as any;
-      (pl.buildings[tier] as any).rotation = buildingRotation;
-      setIsDirty(true);
-      scheduleAutosave();
-    }
-
-    const spritesByTier = (appRef.current as any)?.__buildingSpritesByTier as
-      | Partial<Record<TierKey, PIXI.Sprite>>
-      | undefined;
-    const sprite = spritesByTier?.[tier];
-    if (sprite) sprite.rotation = buildingRotation;
-  }, [buildingRotation, scheduleAutosave]);
+  const closeBuildingCard = useCallback(() => {
+    setIsBuildingCardOpen(false);
+    setCardTier(null);
+  }, []);
 
   const center = useCallback(() => {
     const viewport = viewportRef.current;
@@ -217,61 +143,6 @@ export default function Home() {
     viewport.setZoom(0.7, true);
     viewport.moveCenter(viewport.worldWidth / 2, viewport.worldHeight / 2);
   }, []);
-
-  const reset = useCallback(() => {
-    const viewport = viewportRef.current;
-    if (!viewport) return;
-
-    const payload: MapStatePayloadV1 = {
-      world: { ...WORLD },
-      buildings: { ...DEFAULT_BUILDINGS },
-    };
-    payloadRef.current = payload;
-    setIsDirty(true);
-    void saveMapState(payload as any);
-    center();
-  }, [center]);
-
-  const save = useCallback(() => {
-    const pl = payloadRef.current;
-    if (!pl) return;
-    void saveMapState(pl as any);
-    setIsDirty(false);
-  }, []);
-
-  // Owner modal helpers
-  const openOwnerModalFor = useCallback((tier: TierKey) => {
-    const pl = payloadRef.current;
-    const current = pl?.buildings?.[tier]?.owner;
-    setOwnerName(current?.name ?? "");
-    setOwnerClan(current?.clan ?? "");
-    setOwnerNote(current?.note ?? "");
-    setIsOwnerModalOpen(true);
-  }, []);
-
-  const closeOwnerModal = useCallback(() => setIsOwnerModalOpen(false), []);
-
-  const saveOwner = useCallback(async () => {
-    const tier = selectedBuildingRef.current;
-    if (!tier) return;
-    const pl = payloadRef.current;
-    if (!pl) return;
-
-    const prev = pl.buildings[tier] ?? (DEFAULT_BUILDINGS as any)[tier];
-    pl.buildings[tier] = {
-      ...prev,
-      owner: {
-        name: ownerName.trim(),
-        clan: ownerClan.trim() || undefined,
-        note: ownerNote.trim() || undefined,
-      },
-    } as any;
-
-    setIsDirty(true);
-    await saveMapState(pl as any);
-    setIsDirty(false);
-    setIsOwnerModalOpen(false);
-  }, [ownerName, ownerClan, ownerNote]);
 
   useEffect(() => {
     const hostEl = hostRef.current;
@@ -302,6 +173,7 @@ export default function Home() {
       });
       viewportRef.current = viewport;
 
+      // user mode: only map navigation
       viewport.drag({ mouseButtons: "left" }).pinch().wheel().decelerate({ friction: 0.92 });
       viewport.clampZoom({ minScale: 0.35, maxScale: 2.2 });
 
@@ -330,47 +202,52 @@ export default function Home() {
       buildingsLayer.eventMode = "passive";
       viewport.addChild(buildingsLayer);
 
-      // Load or seed payload
+      // Load payload (view-only)
       let payload: MapStatePayloadV1;
       try {
-        const remote = await loadMapState();
+        const remoteRaw = await loadMapState();
         if (destroyed) return;
 
-        if (remote && remote.buildings) {
-          // Normalize: keep only known tiers, ensure defaults exist
-          const incoming = remote.buildings as Record<string, any>;
+        // loadMapState() should return payload, but tolerate a wrapped Firestore doc shape
+        const remote = (remoteRaw && (remoteRaw as any).payload ? (remoteRaw as any).payload : remoteRaw) as any;
+
+        if (remote && (remote as any).buildings) {
+          const incoming = (remote as any).buildings as Record<string, any>;
           const cleaned: Partial<MapStatePayloadV1["buildings"]> = {};
           for (const t of TIERS) {
             const v = incoming[t];
             if (v && typeof v === "object") (cleaned as any)[t] = { ...(DEFAULT_BUILDINGS as any)[t], ...v };
           }
-          payload = { world: { ...WORLD }, buildings: { ...DEFAULT_BUILDINGS, ...(cleaned as any) } };
-          payloadRef.current = payload;
-          setIsDirty(false);
-          try { await saveMapState(payload as any); } catch {}
+          payload = {
+            world: { ...WORLD },
+            buildings: { ...DEFAULT_BUILDINGS, ...(cleaned as any) },
+            players: ((remote as any).players ?? {}) as any,
+            meta: ((remote as any).meta ?? {}) as any,
+          };
         } else {
-          payload = { world: { ...WORLD }, buildings: { ...DEFAULT_BUILDINGS } };
-          payloadRef.current = payload;
-          setIsDirty(false);
-          await saveMapState(payload as any);
+          payload = {
+            world: { ...WORLD },
+            buildings: { ...DEFAULT_BUILDINGS },
+            players: ((remote as any)?.players ?? {}) as any,
+            meta: ((remote as any)?.meta ?? {}) as any,
+          };
         }
       } catch {
         payload = { world: { ...WORLD }, buildings: { ...DEFAULT_BUILDINGS } };
-        payloadRef.current = payload;
       }
+      payloadRef.current = payload;
+      setDataVersion((v) => v + 1);
 
-      // Sprite factory
-      (appRef.current as any).__buildingSpritesByTier = {} as Partial<Record<TierKey, PIXI.Sprite>>;
-
+      // Sprite factory (view-only)
       const setupBuildingSprite = (tier: TierKey, texture: PIXI.Texture) => {
         const container = new PIXI.Container();
         container.eventMode = "static";
-        container.cursor = "grab";
+        container.cursor = "pointer";
 
         const sprite = new PIXI.Sprite(texture);
         sprite.anchor.set(0.5, 1);
         sprite.eventMode = "static";
-        sprite.cursor = "grab";
+        sprite.cursor = "pointer";
 
         const tw = texture.width;
         const TARGET_W_BY_TIER: Partial<Record<TierKey, number>> = {
@@ -392,7 +269,6 @@ export default function Home() {
         };
         const targetW = TARGET_W_BY_TIER[tier] ?? 200;
         const baseScale = tw > 0 ? targetW / tw : 1;
-        (sprite as any).__baseScale = baseScale;
 
         const fb = (DEFAULT_BUILDINGS as any)[tier] as any;
         const b = (payloadRef.current as any)?.buildings?.[tier] ?? fb;
@@ -402,107 +278,37 @@ export default function Home() {
 
         const userScale = typeof ((payloadRef.current?.buildings?.[tier] as any)?.scale) === "number" ? (payloadRef.current!.buildings as any)[tier].scale : 1;
         sprite.scale.set(baseScale * userScale);
+
         const userRot = typeof ((payloadRef.current?.buildings?.[tier] as any)?.rotation) === "number" ? (payloadRef.current!.buildings as any)[tier].rotation : 0;
         sprite.rotation = userRot;
 
-        ((appRef.current as any).__buildingSpritesByTier as any)[tier] = sprite;
-
-        // Hover/selection highlight (subtle)
-        let isSelected = false;
+        // Hover highlight
         let isHovered = false;
-
         const normalAlpha = 0.98;
         const hoverAlpha = 1.0;
-
-        // Initialize
         sprite.alpha = normalAlpha;
 
-        const applyHighlight = () => {
-          sprite.alpha = isSelected ? 1.0 : isHovered ? hoverAlpha : normalAlpha;
-        };
-
-        // Bind hover events on both sprite and container (more reliable)
         const onOver = () => {
           isHovered = true;
-          applyHighlight();
+          sprite.alpha = isHovered ? hoverAlpha : normalAlpha;
         };
         const onOut = () => {
           isHovered = false;
-          applyHighlight();
+          sprite.alpha = isHovered ? hoverAlpha : normalAlpha;
         };
-
         sprite.on("pointerover", onOver);
         sprite.on("pointerout", onOut);
         container.on("pointerover", onOver);
         container.on("pointerout", onOut);
 
-        (sprite as any).on("pointertap", () => {
-          const prev = selectedBuildingRef.current;
-          if (prev === tier) {
-            isSelected = false;
-            setSelectedBuilding(null);
-            applyHighlight();
-            // Повторный клик по выбранному — откроем модалку для владельца
-            openOwnerModalFor(tier);
-            return;
-          }
-          isSelected = true;
-          setSelectedBuilding(tier);
-          applyHighlight();
+        (sprite as any).on("pointertap", () => openBuildingCard(tier));
 
-          const currentScale = (payloadRef.current?.buildings[tier] as any)?.scale;
-          setBuildingScale(typeof currentScale === "number" ? currentScale : 1);
-          const currentRotation = (payloadRef.current?.buildings[tier] as any)?.rotation;
-          setBuildingRotation(typeof currentRotation === "number" ? currentRotation : 0);
-
-          // Откр��ем модалку владельца на первичный клик
-          openOwnerModalFor(tier);
-        });
-
-        // Dragging
-        let isDragging = false;
-        let dragOffsetLocal = { x: 0, y: 0 };
-        container.on("pointerdown", (e: PIXI.FederatedPointerEvent) => {
-          if (!dragBuildingsRef.current) return;
-          isDragging = true;
-          container.cursor = "grabbing";
-          (e as any).stopPropagation?.();
-          const world = viewport.toWorld(e.global.x, e.global.y);
-          dragOffsetLocal = { x: container.x - world.x, y: container.y - world.y };
-        });
-        container.on("pointerup", () => {
-          if (!isDragging) return;
-          isDragging = false;
-          container.cursor = "grab";
-          const pl = payloadRef.current;
-          if (pl) {
-            pl.buildings[tier] = { ...pl.buildings[tier], x: container.x, y: container.y } as any;
-            setIsDirty(true);
-            scheduleAutosave();
-          }
-        });
-        container.on("pointermove", (e: PIXI.FederatedPointerEvent) => {
-          if (!isDragging) return;
-          const world = viewport.toWorld(e.global.x, e.global.y);
-          container.position.set(world.x + dragOffsetLocal.x, world.y + dragOffsetLocal.y);
-        });
-
-        container.sortableChildren = true;
-        sprite.zIndex = 1;
         container.addChild(sprite);
-        container.hitArea = null;
-
         return container;
       };
 
       // Load textures and add sprites
       const CASTLE_V2_URL = "/buildings/castle/castle_v2.png?v=2";
-      try {
-        (PIXI.Assets as any).cache?.remove?.("/buildings/castle/castle_v1.png");
-        (PIXI.Assets as any).cache?.remove?.("/buildings/castle/castle_v2.png");
-        (PIXI.Assets as any).cache?.remove?.(CASTLE_V2_URL);
-      } catch {}
-
       const castlesTexture = await PIXI.Assets.load("/buildings/castle/castle_v1.png");
       buildingsLayer.addChild(setupBuildingSprite("Замки", castlesTexture));
       const castlesV2Texture = await PIXI.Assets.load(CASTLE_V2_URL);
@@ -578,15 +384,44 @@ export default function Home() {
       appRef.current = null;
       viewportRef.current = null;
     };
-  }, [center, openOwnerModalFor]);
+  }, [center, openBuildingCard]);
 
-  // Handle ESC to close owner modal
+  // Handle ESC to close card
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setIsOwnerModalOpen(false);
+      if (e.key === "Escape") closeBuildingCard();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
+  }, [closeBuildingCard]);
+
+  const displayInfo = useCallback((tier: TierKey) => {
+    const pl = payloadRef.current;
+
+    // Prefer new model: players assigned to building
+    const players = (pl as any)?.players as Record<string, PlayerRec> | undefined;
+    if (players) {
+      const inBuilding = Object.entries(players)
+        .filter(([, p]) => (p?.tier ?? "") === tier)
+        .map(([id, p]) => ({
+          id,
+          name: ((p?.name ?? id) as any)?.toString?.()?.trim?.() ?? String(p?.name ?? id),
+          title: (p?.title ?? "").toString().trim(),
+          desc: (p?.desc ?? "").toString().trim(),
+        }));
+
+      if (inBuilding.length > 0) {
+        const p = inBuilding[0]!;
+        return { name: p.name, title: p.title, note: p.desc };
+      }
+    }
+
+    // Fallback to legacy model: buildings[tier].owner
+    const owner = pl?.buildings?.[tier]?.owner;
+    const name = (owner?.name ?? "").trim();
+    const clan = (owner?.clan ?? "").trim();
+    const note = (owner?.note ?? "").trim();
+    return { name, title: clan, note };
   }, []);
 
   return (
@@ -594,205 +429,121 @@ export default function Home() {
       {/* Canvas host */}
       <div ref={hostRef} style={{ flex: 1 }} />
 
-      {/* Floating control button & panel */}
-      <button
-        onClick={() => {
-          const panel = document.querySelector("#aoe-fly-panel");
-          if (!panel) return;
-          const open = panel.getAttribute("data-open") === "true";
-          panel.setAttribute("data-open", (!open).toString());
-        }}
-        style={{
-          position: "fixed",
-          right: 16,
-          bottom: 16,
-          zIndex: 1000,
-          width: 56,
-          height: 56,
-          borderRadius: 28,
-          border: "2px solid #caa24d",
-          background: "#2b1a12",
-          color: "#f7f0df",
-          fontWeight: 800,
-          cursor: "pointer",
-          boxShadow: "0 4px 16px rgba(0,0,0,0.35)",
-        }}
-        title="Панель управления"
-      >
-        ☰
-      </button>
-
-      <div
-        id="aoe-fly-panel"
-        data-open="false"
-        style={{
-          position: "fixed",
-          right: 16,
-          bottom: 84,
-          zIndex: 999,
-          maxWidth: 520,
-          background: "rgba(11,18,32,0.96)",
-          border: "1px solid #3a2a1a",
-          borderRadius: 12,
-          padding: 12,
-          display: "flex",
-          flexDirection: "column",
-          gap: 8,
-          transform: "translateY(8px)",
-          opacity: 0,
-          pointerEvents: "none",
-          transition: "opacity 120ms ease, transform 120ms ease",
-          color: "#f7f0df",
-        }}
-      >
-        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          <div style={{ fontSize: 16, fontWeight: 800 }}>AOE Estonia — Карта</div>
-          <div style={{ opacity: 0.85, fontWeight: 800, fontSize: 12 }}>(buildings)</div>
-          <div style={{ flex: 1 }} />
-        </div>
-
-        <button
-          onClick={() => setDragBuildings((v) => !v)}
-          style={{
-            padding: "6px 10px",
-            borderRadius: 8,
-            border: "1px solid #3a2a1a",
-            background: "#2b1a12",
-            color: "#f7f0df",
-            cursor: "pointer",
-          }}
-          title="Перетаскивание зданий"
-        >
-          {dragBuildings ? "Drag building: ON" : "Drag building: OFF"}
-        </button>
-
-        {selectedBuilding && (
-          <>
-            <label style={{ display: "flex", alignItems: "center", gap: 8 }}>
-              <span>Size</span>
-              <input
-                type="range"
-                min={0.1}
-                max={4}
-                step={0.05}
-                value={buildingScale}
-                onChange={(e) => setBuildingScale(Number(e.target.value))}
-                style={{ width: 200 }}
-              />
-              <span style={{ width: 140, textAlign: "right", fontVariantNumeric: "tabular-nums" }}>
-                {selectedBuilding} {buildingScale.toFixed(2)}
-              </span>
-            </label>
-
-            <label style={{ display: "flex", alignItems: "center", gap: 8 }}>
-              <span>Rot</span>
-              <input
-                type="range"
-                min={-3.1416}
-                max={3.1416}
-                step={0.01}
-                value={buildingRotation}
-                onChange={(e) => setBuildingRotation(Number(e.target.value))}
-                style={{ width: 200 }}
-              />
-              <span style={{ width: 80, textAlign: "right", fontVariantNumeric: "tabular-nums" }}>
-                {buildingRotation.toFixed(2)}
-              </span>
-            </label>
-
-            <button
-              onClick={() => selectedBuilding && openOwnerModalFor(selectedBuilding)}
-              style={{
-                padding: "6px 10px",
-                borderRadius: 8,
-                border: "1px solid #3a2a1a",
-                background: "#2b1a12",
-                color: "#f7f0df",
-                cursor: "pointer",
-              }}
-              title="Редактировать владельца"
-            >
-              Owner
-            </button>
-          </>
-        )}
-
-        <div style={{ display: "flex", gap: 8 }}>
-          <button onClick={center} style={{ padding: "6px 10px", borderRadius: 8, border: "1px solid #3a2a1a", background: "#2b1a12", color: "#f7f0df", cursor: "pointer" }}>
-            Center
-          </button>
-          <button onClick={save} style={{ padding: "6px 10px", borderRadius: 8, border: "1px solid #3a2a1a", background: "#2b1a12", color: "#f7f0df", cursor: "pointer" }} title="Со��ранить в Firebase">
-            Save{isDirty ? "*" : ""}
-          </button>
-          <button onClick={reset} style={{ padding: "6px 10px", borderRadius: 8, border: "1px solid #3a2a1a", background: "#2b1a12", color: "#f7f0df", cursor: "pointer" }} title="Сбросить и пересохранить в Firebase">
-            Reset
-          </button>
-        </div>
-      </div>
-
-      {/* Owner modal */}
-      {isOwnerModalOpen && (
+      {/* Building card modal (view-only) */}
+      {isBuildingCardOpen && cardTier && (
         <div
-          onClick={closeOwnerModal}
+          onClick={closeBuildingCard}
           style={{
             position: "fixed",
             inset: 0,
-            background: "rgba(0,0,0,0.5)",
+            background: "rgba(0,0,0,0.35)",
             display: "flex",
             alignItems: "center",
             justifyContent: "center",
-            zIndex: 2000,
+            zIndex: 3400,
+            padding: 16,
           }}
         >
           <div
             onClick={(e) => e.stopPropagation()}
             style={{
-              width: 420,
-              maxWidth: "90vw",
+              width: "min(760px, calc(100vw - 32px))",
               background: "#0b1220",
               color: "#f7f0df",
               border: "1px solid #3a2a1a",
               borderRadius: 12,
               boxShadow: "0 12px 48px rgba(0,0,0,0.45)",
-              padding: 16,
+              padding: 14,
             }}
           >
-            <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
-              <div style={{ fontWeight: 800, fontSize: 16 }}>Владелец здания</div>
+            <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10 }}>
+              <div
+                style={{
+                  fontWeight: 900,
+                  fontSize: 18,
+                  overflow: "hidden",
+                  textOverflow: "ellipsis",
+                  whiteSpace: "nowrap",
+                }}
+                title={(payloadRef.current as any)?.meta?.tierNames?.[cardTier] ?? cardTier}
+              >
+                {(payloadRef.current?.meta?.tierNames?.[cardTier] ?? "").toString().trim() || cardTier}
+              </div>
               <div style={{ flex: 1 }} />
-              <button onClick={closeOwnerModal} style={{ background: "transparent", border: 0, color: "#f7f0df", cursor: "pointer", fontSize: 18 }}>×</button>
+              <button
+                onClick={closeBuildingCard}
+                style={{ background: "transparent", border: 0, color: "#f7f0df", cursor: "pointer", fontSize: 18 }}
+              >
+                ×
+              </button>
             </div>
 
-            <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-              <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                <span style={{ opacity: 0.8 }}>Имя владельца</span>
-                <input value={ownerName} onChange={(e) => setOwnerName(e.target.value)} placeholder="Имя" style={{ padding: 8, borderRadius: 8, border: "1px solid #3a2a1a", background: "#1a2438", color: "#f7f0df" }} />
-              </label>
-              <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                <span style={{ opacity: 0.8 }}>Клан / фракция (необязательно)</span>
-                <input value={ownerClan} onChange={(e) => setOwnerClan(e.target.value)} placeholder="Клан" style={{ padding: 8, borderRadius: 8, border: "1px solid #3a2a1a", background: "#1a2438", color: "#f7f0df" }} />
-              </label>
-              <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                <span style={{ opacity: 0.8 }}>Заметка (необязательно)</span>
-                <textarea value={ownerNote} onChange={(e) => setOwnerNote(e.target.value)} placeholder="Комментарий" rows={3} style={{ padding: 8, borderRadius: 8, border: "1px solid #3a2a1a", background: "#1a2438", color: "#f7f0df", resize: "vertical" }} />
-              </label>
-            </div>
+            {(() => {
+              void dataVersion;
+              const info = displayInfo(cardTier);
+              const name = (info?.name ?? "").trim();
+              const title = (info?.title ?? "").trim();
+              const note = (info?.note ?? "").trim();
 
-            <div style={{ display: "flex", gap: 8, marginTop: 14, justifyContent: "flex-end" }}>
-              <button onClick={closeOwnerModal} style={{ padding: "6px 12px", borderRadius: 8, border: "1px solid #3a2a1a", background: "#1a2438", color: "#f7f0df", cursor: "pointer" }}>Отмена</button>
-              <button onClick={saveOwner} style={{ padding: "6px 12px", borderRadius: 8, border: "1px solid #caa24d", background: "#2b1a12", color: "#f7f0df", cursor: "pointer", fontWeight: 700 }}>Сохранить</button>
-            </div>
+              if (!name && !title && !note) return <div style={{ opacity: 0.85 }}>(нет информации)</div>;
+
+              // Try to resolve avatar (same special-case as admin)
+              const players = (payloadRef.current as any)?.players as Record<string, PlayerRec> | undefined;
+              const found = players
+                ? Object.entries(players).find(([, p]) => (p?.tier ?? "") === cardTier)
+                : undefined;
+              const playerId = found?.[0];
+              const avatar = playerId === "u003" ? "/people/tsumi.png" : "";
+
+              return (
+                <div style={{ display: "flex", gap: 12, alignItems: "flex-start" }}>
+                  {avatar ? (
+                    <div
+                      style={{
+                        flex: "0 0 auto",
+                        border: "2px solid rgba(202,162,77,0.9)",
+                        borderRadius: 28,
+                        boxShadow: "0 10px 30px rgba(0,0,0,0.45)",
+                        overflow: "hidden",
+                      }}
+                    >
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img
+                        src={avatar}
+                        alt="avatar"
+                        style={{ width: 240, height: 240, objectFit: "cover", display: "block" }}
+                      />
+                    </div>
+                  ) : (
+                    <div
+                      style={{
+                        width: 240,
+                        height: 240,
+                        borderRadius: 28,
+                        background: "rgba(255,255,255,0.06)",
+                        border: "2px solid rgba(255,255,255,0.14)",
+                        boxShadow: "0 10px 30px rgba(0,0,0,0.35)",
+                      }}
+                    />
+                  )}
+
+                  <div style={{ minWidth: 0, flex: 1 }}>
+                    {name && (
+                      <div style={{ fontWeight: 900, fontSize: 16 }} title={title ? `${name} — ${title}` : name}>
+                        {title ? `${name} — ${title}` : name}
+                      </div>
+                    )}
+                    {title && !name && <div style={{ fontWeight: 900, fontSize: 16 }}>{title}</div>}
+                    {note && (
+                      <div style={{ marginTop: 8, opacity: 0.9, lineHeight: 1.35, whiteSpace: "pre-wrap" }}>{note}</div>
+                    )}
+                  </div>
+                </div>
+              );
+            })()}
           </div>
         </div>
       )}
-
-      <style>{`
-        #aoe-fly-panel[data-open="true"] {
-          opacity: 1 !important;
-          transform: translateY(0) !important;
-          pointer-events: auto !important;
-        }
-      `}</style>
     </div>
   );
 }

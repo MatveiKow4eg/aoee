@@ -1328,15 +1328,11 @@ export default function AdminMapPage() {
                         textOverflow: "ellipsis",
                         whiteSpace: "nowrap",
                       }}
-                      title={p.name}
+                      title={p.title ? `${p.name} — ${p.title}` : p.name}
                     >
-                      {p.name}
+                      {p.title ? `${p.name} — ${p.title}` : p.name}
                     </div>
-                    {p.title ? (
-                      <div style={{ marginTop: 4, opacity: 0.9, fontWeight: 800 }}>{p.title}</div>
-                    ) : (
-                      <div style={{ marginTop: 4, opacity: 0.65 }}>(без титула)</div>
-                    )}
+                    {/* Титул показываем рядом с ником; отдельной строкой не дублируем */}
                     {p.desc ? (
                       <div style={{ marginTop: 8, opacity: 0.9, lineHeight: 1.35, whiteSpace: "pre-wrap" }}>
                         {p.desc}
@@ -1912,13 +1908,13 @@ export default function AdminMapPage() {
                                     tabIndex={0}
                                     onClick={(e) => {
                                       e.stopPropagation();
-                                      setPreviewTier(p.tier!);
+                                      if (p.tier) setPreviewTier(p.tier);
                                     }}
                                     onKeyDown={(e) => {
                                       if (e.key === "Enter" || e.key === " ") {
                                         e.preventDefault();
                                         e.stopPropagation();
-                                        setPreviewTier(p.tier!);
+                                        if (p.tier) setPreviewTier(p.tier);
                                       }
                                     }}
                                     style={{
