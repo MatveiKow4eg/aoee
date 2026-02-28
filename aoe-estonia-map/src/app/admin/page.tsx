@@ -35,6 +35,15 @@ type Rect = { x: number; y: number; w: number; h: number };
 
 type PlayerRec = { name?: string; tier?: TierKey | ""; title?: string; desc?: string; avatar?: string };
 
+const avatarByPlayerId = (playerId?: string, rec?: PlayerRec | null): string => {
+  if (!playerId) return "";
+  // 1) explicit override from DB
+  const fromDb = (rec as any)?.avatar;
+  if (typeof fromDb === "string" && fromDb.trim()) return fromDb.trim();
+  // 2) convention: /public/people/{id}.png
+  return `/people/${encodeURIComponent(playerId)}.png`;
+};
+
 type MapStatePayloadV1 = {
   world: { w: number; h: number; mapTextureVersion: number };
   buildings: Record<
@@ -184,6 +193,7 @@ export default function AdminMapPage() {
   const payloadRef = useRef<MapStatePayloadV1 | null>(null);
 
   const [metaVersion, setMetaVersion] = useState(0);
+  const [isLoading, setIsLoading] = useState(true);
 
   const tierDisplayName = useCallback(
     (tier: TierKey) => {
@@ -273,10 +283,39 @@ export default function AdminMapPage() {
       if (dragBuildings) viewport.plugins.pause("drag");
       else viewport.plugins.resume("drag");
     }
+
+    // When Drag mode is turned OFF, clear selected building highlight
+    if (!dragBuildings) {
+      setSelectedBuilding(null);
+      // Force immediate visual update so no selection highlight remains
+      const spritesByTier = (appRef.current as any)?.__buildingSpritesByTier as
+        | Partial<Record<TierKey, PIXI.Sprite>>
+        | undefined;
+      if (spritesByTier) {
+        for (const t of TIERS) {
+          const s = (spritesByTier as any)[t] as any;
+          const apply = s?.__applyHighlight;
+          if (typeof apply === "function") apply();
+        }
+      }
+    }
   }, [dragBuildings]);
 
   useEffect(() => {
     selectedBuildingRef.current = selectedBuilding;
+
+    // Re-apply selection highlight immediately when selection changes
+    const spritesByTier = (appRef.current as any)?.__buildingSpritesByTier as
+      | Partial<Record<TierKey, PIXI.Sprite>>
+      | undefined;
+
+    if (spritesByTier) {
+      for (const t of TIERS) {
+        const s = (spritesByTier as any)[t] as any;
+        const apply = s?.__applyHighlight;
+        if (typeof apply === "function") apply();
+      }
+    }
   }, [selectedBuilding]);
 
   const center = useCallback(() => {
@@ -530,8 +569,71 @@ export default function AdminMapPage() {
       id,
       name: normalizeName(id, p),
       tier: normalizeTier(p),
+      title: (p?.title ?? "").toString().trim(),
     }));
-    res.sort((a, b) => (a.name || "").localeCompare(b.name || "", "ru"));
+
+    // Custom priority order:
+    // 1) Король Кирилл
+    // 2) Герцог
+    // 3) Граф
+    // 4) Барон
+    // 5) Крепости
+    // 6) Донжоны
+    // 7) Башни
+    // 8) Халупа
+    const isKingKirill = (p: { name: string; title: string }) => p.title === "Король" && p.name.toLocaleLowerCase("ru") === "кирилл";
+
+    const TITLE_ORDER = ["Король", "Герцог", "Граф", "Барон"] as const;
+    const titleRank = (t?: string) => {
+      const idx = TITLE_ORDER.indexOf((t ?? "") as any);
+      return idx === -1 ? Number.POSITIVE_INFINITY : idx;
+    };
+
+    const tierGroup = (t: TierKey | ""): string => {
+      if (!t) return "";
+      if (t.startsWith("Крепости")) return "Крепости";
+      if (t.startsWith("Донжоны")) return "Донжоны";
+      if (t.startsWith("Башня")) return "Башни";
+      if (t.startsWith("Халупа")) return "Халупа";
+      return t;
+    };
+
+    const GROUP_ORDER = ["Крепости", "Донжоны", "Башни", "Халупа"] as const;
+    const groupRank = (t: TierKey | "") => {
+      const g = tierGroup(t);
+      const idx = (GROUP_ORDER as readonly string[]).indexOf(g);
+      return idx === -1 ? Number.POSITIVE_INFINITY : idx;
+    };
+
+    res.sort((a, b) => {
+      // абсолютный топ
+      const ak = isKingKirill(a);
+      const bk = isKingKirill(b);
+      if (ak !== bk) return ak ? -1 : 1;
+
+      // 2-4) титулы
+      const ta = titleRank(a.title);
+      const tb = titleRank(b.title);
+      if (ta !== tb) return ta - tb;
+
+      // 5-8) группы с��роений
+      const ga = groupRank(a.tier);
+      const gb = groupRank(b.tier);
+      if (ga !== gb) return ga - gb;
+
+      // внутри группы: базовая/варианты и затем имя
+      if (a.tier && b.tier) {
+        const ag = tierGroup(a.tier);
+        const bg = tierGroup(b.tier);
+        if (ag === bg) {
+          const tierCmp = (a.tier || "").localeCompare(b.tier || "", "ru");
+          if (tierCmp !== 0) return tierCmp;
+        }
+      }
+
+      return (a.name || "").localeCompare(b.name || "", "ru");
+    });
+
     return res;
   }, [isAssignModalOpen, stagedPlayers, isRosterOpen]);
 
@@ -664,6 +766,8 @@ export default function AdminMapPage() {
     const hostEl = hostRef.current;
     if (!hostEl) return;
 
+    setIsLoading(true);
+
     const app = new PIXI.Application();
     appRef.current = app;
 
@@ -695,6 +799,7 @@ export default function AdminMapPage() {
       app.stage.addChild(viewport);
 
       const mapTexture = await PIXI.Assets.load(MAP_URL);
+      if (destroyed) return;
       const mapSprite = new PIXI.Sprite(mapTexture);
       mapSprite.x = 0;
       mapSprite.y = 0;
@@ -813,31 +918,46 @@ export default function AdminMapPage() {
 
         // Hover highlight
         let isHovered = false;
-        const normalAlpha = 0.98;
+        const normalAlpha = 0.92;
         const hoverAlpha = 1.0;
-        sprite.alpha = normalAlpha;
+        const normalTint = 0xffffff;
+        const hoverTint = 0xfff1c8; // warm slight highlight
 
-        const onOver = () => {
-          isHovered = true;
-          sprite.alpha = isHovered ? hoverAlpha : normalAlpha;
+        sprite.alpha = normalAlpha;
+        sprite.tint = normalTint;
+
+        const applyHover = (next: boolean) => {
+          isHovered = next;
+          const isSelected = dragBuildingsRef.current && selectedBuildingRef.current === tier;
+          const active = isHovered || isSelected;
+          sprite.alpha = active ? hoverAlpha : normalAlpha;
+          sprite.tint = active ? hoverTint : normalTint;
         };
-        const onOut = () => {
-          isHovered = false;
-          sprite.alpha = isHovered ? hoverAlpha : normalAlpha;
-        };
+
+        // Allow React to re-apply highlight when selectedBuilding changes
+        (sprite as any).__applyHighlight = () => applyHover(isHovered);
+
+        const onOver = () => applyHover(true);
+        const onOut = () => applyHover(false);
         sprite.on("pointerover", onOver);
         sprite.on("pointerout", onOut);
         container.on("pointerover", onOver);
         container.on("pointerout", onOut);
 
-        // Click opens building card
+        // Click:
+        // - Drag OFF: open the building card (player info)
+        // - Drag ON: select building for editing (keep sticky highlight)
         (sprite as any).on("pointertap", () => {
+          if (!dragBuildingsRef.current) {
+            openBuildingCard(tier);
+            return;
+          }
+
           setSelectedBuilding(tier);
           const currentScale = (payloadRef.current?.buildings[tier] as any)?.scale;
           setBuildingScale(typeof currentScale === "number" ? currentScale : 1);
           const currentRotation = (payloadRef.current?.buildings[tier] as any)?.rotation;
           setBuildingRotation(typeof currentRotation === "number" ? currentRotation : 0);
-          openBuildingCard(tier);
         });
 
         // Dragging (admin too)
@@ -927,9 +1047,13 @@ export default function AdminMapPage() {
       const basnjaV3Texture = await PIXI.Assets.load("/buildings/basnja/basnja%20v3.png");
       buildingsLayer.addChild(setupBuildingSprite("Башня v3", basnjaV3Texture));
       const basnjaV4Texture = await PIXI.Assets.load("/buildings/basnja/basnja%20v4.png");
+      if (destroyed) return;
       buildingsLayer.addChild(setupBuildingSprite("Башня v4", basnjaV4Texture));
 
       center();
+
+      // Everything needed for displaying the map is loaded
+      setIsLoading(false);
 
       const ro = new ResizeObserver(() => {
         if (destroyed) return;
@@ -947,6 +1071,7 @@ export default function AdminMapPage() {
     return () => {
       destroyed = true;
       payloadRef.current = null;
+      setIsLoading(true);
       try {
         const canvas = app.canvas;
         canvas?.parentElement?.removeChild(canvas);
@@ -976,6 +1101,60 @@ export default function AdminMapPage() {
 
   return (
     <div style={{ height: "100dvh", display: "flex", flexDirection: "column" }}>
+      {/* Loader overlay */}
+      {isLoading && (
+        <div
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "#0b1220",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            zIndex: 5000,
+          }}
+          aria-busy="true"
+          aria-live="polite"
+        >
+          <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 16 }}>
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src="/loader/load.png"
+              alt="loading"
+              style={{
+                width: 220,
+                height: "auto",
+                display: "block",
+                filter: "drop-shadow(0 10px 26px rgba(0,0,0,0.55))",
+              }}
+            />
+
+            <div
+              style={{
+                width: 54,
+                height: 54,
+                borderRadius: "50%",
+                border: "6px solid rgba(247,240,223,0.22)",
+                borderTopColor: "rgba(202,162,77,0.95)",
+                animation: "aoeSpin 0.9s linear infinite",
+              }}
+            />
+          </div>
+        </div>
+      )}
+
+      {/* Global keyframes once */}
+      <style jsx global>{`
+        @keyframes aoeSpin {
+          from {
+            transform: rotate(0deg);
+          }
+          to {
+            transform: rotate(360deg);
+          }
+        }
+      `}</style>
+
       <div ref={hostRef} className="aoe-canvasHost" />
 
       {/* Roster button (bottom-right) */}
@@ -1131,37 +1310,40 @@ export default function AdminMapPage() {
               </button>
             </div>
 
-            <label style={{ display: "flex", alignItems: "center", gap: 8 }}>
-              <span>Size</span>
-              <input
-                type="range"
-                min={0.1}
-                max={4}
-                step={0.05}
-                value={buildingScale}
-                onChange={(e) => setBuildingScale(Number(e.target.value))}
-                style={{ width: 220 }}
-              />
-              <span style={{ width: 60, textAlign: "right", fontVariantNumeric: "tabular-nums" }}>
-                {buildingScale.toFixed(2)}
-              </span>
-            </label>
+            {/* Size/Rot controls */}
+            <>
+              <label style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <span>Size</span>
+                <input
+                  type="range"
+                  min={0.1}
+                  max={4}
+                  step={0.05}
+                  value={buildingScale}
+                  onChange={(e) => setBuildingScale(Number(e.target.value))}
+                  style={{ width: 220 }}
+                />
+                <span style={{ width: 60, textAlign: "right", fontVariantNumeric: "tabular-nums" }}>
+                  {buildingScale.toFixed(2)}
+                </span>
+              </label>
 
-            <label style={{ display: "flex", alignItems: "center", gap: 8 }}>
-              <span>Rot</span>
-              <input
-                type="range"
-                min={-3.1416}
-                max={3.1416}
-                step={0.01}
-                value={buildingRotation}
-                onChange={(e) => setBuildingRotation(Number(e.target.value))}
-                style={{ width: 220 }}
-              />
-              <span style={{ width: 60, textAlign: "right", fontVariantNumeric: "tabular-nums" }}>
-                {buildingRotation.toFixed(2)}
-              </span>
-            </label>
+              <label style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <span>Rot</span>
+                <input
+                  type="range"
+                  min={-3.1416}
+                  max={3.1416}
+                  step={0.01}
+                  value={buildingRotation}
+                  onChange={(e) => setBuildingRotation(Number(e.target.value))}
+                  style={{ width: 220 }}
+                />
+                <span style={{ width: 60, textAlign: "right", fontVariantNumeric: "tabular-nums" }}>
+                  {buildingRotation.toFixed(2)}
+                </span>
+              </label>
+            </>
           </>
         )}
 
@@ -1270,7 +1452,7 @@ export default function AdminMapPage() {
               }
 
               const p = inBuilding[0];
-              const avatar = p.id === 'u003' ? '/people/tsumi.png' : (p.avatar ?? avatarUrlFor(p.name));
+              const avatar = avatarByPlayerId(p.id, p as any);
 
               return (
                 <div style={{ display: "flex", gap: 12, alignItems: "flex-start" }}>
@@ -1455,9 +1637,9 @@ export default function AdminMapPage() {
                   <div style={{ minWidth: 0 }}>
                     <div
                       style={{ fontWeight: 900, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
-                      title={p.name}
+                      title={p.title ? `${p.name} — ${p.title}` : p.name}
                     >
-                      {p.name}
+                      {p.title ? `${p.name} — ${p.title}` : p.name}
                     </div>
                     {/* id hidden */}
                   </div>
@@ -1725,7 +1907,7 @@ export default function AdminMapPage() {
                             {/* avatar */}
                             {(() => {
                               const rec = (effectivePlayers as any)[p.id] as any;
-                              const av = p.id === 'u003' ? '/people/tsumi.png' : (rec?.avatar ?? avatarUrlFor(p.name));
+                              const av = avatarByPlayerId(p.id, rec);
                               return av ? (
                                 <div
                                   role="button"
@@ -1867,7 +2049,7 @@ export default function AdminMapPage() {
                                 {/* avatar */}
                                 {(() => {
                                   const rec = (effectivePlayers as any)[p.id] as any;
-                                  const av = p.id === 'u003' ? '/people/tsumi.png' : (rec?.avatar ?? avatarUrlFor(p.name));
+                                  const av = avatarByPlayerId(p.id, rec);
                                   return av ? (
                                     <div
                                       role="button"
@@ -2094,9 +2276,23 @@ export default function AdminMapPage() {
                                     value={editBioPlayerId === selectedPlayerId ? editTitleValue : ((effectivePlayers as any)[selectedPlayerId!]?.title ?? "")}
                                     onChange={(e) => {
                                       const val = e.target.value;
+
+                                      // If we start editing bio for this player, initialize edit buffers from current state
+                                      if (editBioPlayerId !== selectedPlayerId) {
+                                        const cur = (effectivePlayers as any)[selectedPlayerId!] ?? {};
+                                        setEditTitleValue((cur?.title ?? "").toString());
+                                        setEditDescValue((cur?.desc ?? "").toString());
+                                      }
+
                                       setEditBioPlayerId(selectedPlayerId);
                                       setEditTitleValue(val);
-                                      updatePlayerBio(selectedPlayerId!, val, editDescValue);
+
+                                      const curDesc =
+                                        editBioPlayerId === selectedPlayerId
+                                          ? editDescValue
+                                          : (((effectivePlayers as any)[selectedPlayerId!]?.desc ?? "") as any);
+
+                                      updatePlayerBio(selectedPlayerId!, val, String(curDesc));
                                     }}
                                     style={{ width: "100%", padding: 8, borderRadius: 8, border: "1px solid #3a2a1a", background: "#1a2438", color: "#f7f0df" }}
                                   >
@@ -2113,9 +2309,23 @@ export default function AdminMapPage() {
                                     value={editBioPlayerId === selectedPlayerId ? editDescValue : ((effectivePlayers as any)[selectedPlayerId!]?.desc ?? "")}
                                     onChange={(e) => {
                                       const val = e.target.value;
+
+                                      // If we start editing bio for this player, initialize edit buffers from current state
+                                      if (editBioPlayerId !== selectedPlayerId) {
+                                        const cur = (effectivePlayers as any)[selectedPlayerId!] ?? {};
+                                        setEditTitleValue((cur?.title ?? "").toString());
+                                        setEditDescValue((cur?.desc ?? "").toString());
+                                      }
+
                                       setEditBioPlayerId(selectedPlayerId);
                                       setEditDescValue(val);
-                                      updatePlayerBio(selectedPlayerId!, editTitleValue, val);
+
+                                      const curTitle =
+                                        editBioPlayerId === selectedPlayerId
+                                          ? editTitleValue
+                                          : (((effectivePlayers as any)[selectedPlayerId!]?.title ?? "") as any);
+
+                                      updatePlayerBio(selectedPlayerId!, String(curTitle), val);
                                     }}
                                     placeholder="Описание"
                                     rows={4}

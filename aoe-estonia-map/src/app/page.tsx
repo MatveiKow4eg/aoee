@@ -37,6 +37,22 @@ type Owner = { name: string; clan?: string; note?: string };
 
 type PlayerRec = { name?: string; tier?: TierKey | ""; title?: string; desc?: string; avatar?: string };
 
+const avatarUrlFor = (name?: string): string => {
+  const n = (name ?? "").trim();
+  if (!n) return "";
+  // Placeholder: no avatar source configured
+  return "";
+};
+
+const avatarByPlayerId = (playerId?: string, rec?: PlayerRec | null): string => {
+  if (!playerId) return "";
+  // 1) explicit override from DB
+  const fromDb = (rec as any)?.avatar;
+  if (typeof fromDb === "string" && fromDb.trim()) return fromDb.trim();
+  // 2) convention: /public/people/{id}.png
+  return `/people/${encodeURIComponent(playerId)}.png`;
+};
+
 type MapStatePayloadV1 = {
   world: { w: number; h: number; mapTextureVersion: number };
   buildings: Record<
@@ -126,6 +142,9 @@ export default function Home() {
   const [isBuildingCardOpen, setIsBuildingCardOpen] = useState(false);
   const [cardTier, setCardTier] = useState<TierKey | null>(null);
   const [dataVersion, setDataVersion] = useState(0);
+  const [isLoading, setIsLoading] = useState(true);
+  const [isLoaded, setIsLoaded] = useState(false);
+  const [hasEntered, setHasEntered] = useState(false);
 
   const openBuildingCard = useCallback((tier: TierKey) => {
     setCardTier(tier);
@@ -148,21 +167,26 @@ export default function Home() {
     const hostEl = hostRef.current;
     if (!hostEl) return;
 
+    const loadStartedAt = Date.now();
+    setIsLoading(true);
+    setIsLoaded(false);
+
     const app = new PIXI.Application();
     appRef.current = app;
 
     let destroyed = false;
 
     (async () => {
-      await app.init({
-        background: "#0b1220",
-        resizeTo: hostEl,
-        antialias: true,
-        resolution: Math.min(2, window.devicePixelRatio || 1),
-      });
-      if (destroyed) return;
+      try {
+        await app.init({
+          background: "#0b1220",
+          resizeTo: hostEl,
+          antialias: true,
+          resolution: Math.min(2, window.devicePixelRatio || 1),
+        });
+        if (destroyed) return;
 
-      hostEl.appendChild(app.canvas);
+        hostEl.appendChild(app.canvas);
 
       const viewport = new Viewport({
         screenWidth: hostEl.clientWidth,
@@ -180,6 +204,7 @@ export default function Home() {
       app.stage.addChild(viewport);
 
       const mapTexture = await PIXI.Assets.load(MAP_URL);
+      if (destroyed) return;
       const mapSprite = new PIXI.Sprite(mapTexture);
       mapSprite.x = 0;
       mapSprite.y = 0;
@@ -222,6 +247,7 @@ export default function Home() {
             world: { ...WORLD },
             buildings: { ...DEFAULT_BUILDINGS, ...(cleaned as any) },
             players: ((remote as any).players ?? {}) as any,
+
             meta: ((remote as any).meta ?? {}) as any,
           };
         } else {
@@ -356,9 +382,19 @@ export default function Home() {
       const basnjaV3Texture = await PIXI.Assets.load("/buildings/basnja/basnja%20v3.png");
       buildingsLayer.addChild(setupBuildingSprite("Башня v3", basnjaV3Texture));
       const basnjaV4Texture = await PIXI.Assets.load("/buildings/basnja/basnja%20v4.png");
+      if (destroyed) return;
       buildingsLayer.addChild(setupBuildingSprite("Башня v4", basnjaV4Texture));
 
       center();
+
+      // Everything needed for displaying the map is loaded.
+      // Keep loader for at least 2 seconds (even if everything is fast).
+      const elapsed = Date.now() - loadStartedAt;
+      const waitMs = Math.max(0, 2000 - elapsed);
+      if (waitMs > 0) await new Promise((r) => setTimeout(r, waitMs));
+      if (destroyed) return;
+      setIsLoading(false);
+      setIsLoaded(true);
 
       const ro = new ResizeObserver(() => {
         if (destroyed) return;
@@ -371,11 +407,19 @@ export default function Home() {
       ro.observe(hostEl);
 
       return () => ro.disconnect();
+      } catch (e) {
+        console.error("[Map] init/load failed", e);
+        if (!destroyed) {
+          setIsLoading(false);
+          setIsLoaded(true);
+        }
+      }
     })();
 
     return () => {
       destroyed = true;
       payloadRef.current = null;
+      setIsLoading(false);
       try {
         const canvas = app.canvas;
         canvas?.parentElement?.removeChild(canvas);
@@ -425,9 +469,109 @@ export default function Home() {
   }, []);
 
   return (
-    <div style={{ height: "100dvh", display: "flex", flexDirection: "column" }}>
+    <div style={{ height: "100vh", display: "flex", flexDirection: "column", overflow: "hidden" }}>
+      {/* Loader / Enter overlay */}
+      {!hasEntered && (
+        <div
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "transparent",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            zIndex: 5000,
+            padding: 16,
+            pointerEvents: "none",
+          }}
+        >
+          <div
+            style={{
+              display: "flex",
+              flexDirection: "column",
+              alignItems: "center",
+              gap: 18,
+              width: "100%",
+              pointerEvents: "auto",
+            }}
+          >
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src="/loader/load.png"
+              alt="loading"
+              style={{
+                width: "min(92vw, 980px)",
+                maxHeight: "70vh",
+                height: "auto",
+                display: "block",
+                objectFit: "contain",
+                filter: "drop-shadow(0 14px 40px rgba(0,0,0,0.6))",
+              }}
+            />
+
+            {isLoading && (
+              <div
+                style={{
+                  width: 72,
+                  height: 72,
+                  borderRadius: "50%",
+                  border: "8px solid rgba(247,240,223,0.22)",
+                  borderTopColor: "rgba(202,162,77,0.95)",
+                  animation: "aoeSpin 0.9s linear infinite",
+                }}
+              />
+            )}
+
+            {!isLoading && isLoaded && (
+              <button
+                onClick={() => setHasEntered(true)}
+                style={{
+                  padding: "14px 34px",
+                  borderRadius: 0,
+                  border: "2px solid rgba(202,162,77,0.95)",
+                  background: "linear-gradient(180deg, rgba(202,162,77,0.22), rgba(43,26,18,0.12))",
+                  color: "#f7f0df",
+                  fontWeight: 900,
+                  fontSize: 18,
+                  letterSpacing: 0.6,
+                  textTransform: "uppercase",
+                  cursor: "pointer",
+                  boxShadow: "0 14px 34px rgba(0,0,0,0.45)",
+                  transition: "transform 120ms ease, filter 120ms ease",
+                }}
+                onMouseDown={(e) => {
+                  (e.currentTarget as HTMLButtonElement).style.transform = "translateY(1px)";
+                  (e.currentTarget as HTMLButtonElement).style.filter = "brightness(0.95)";
+                }}
+                onMouseUp={(e) => {
+                  (e.currentTarget as HTMLButtonElement).style.transform = "translateY(0px)";
+                  (e.currentTarget as HTMLButtonElement).style.filter = "none";
+                }}
+                onMouseLeave={(e) => {
+                  (e.currentTarget as HTMLButtonElement).style.transform = "translateY(0px)";
+                  (e.currentTarget as HTMLButtonElement).style.filter = "none";
+                }}
+              >
+                Карта
+              </button>
+            )}
+
+            <style jsx global>{`
+              @keyframes aoeSpin {
+                from {
+                  transform: rotate(0deg);
+                }
+                to {
+                  transform: rotate(360deg);
+                }
+              }
+            `}</style>
+          </div>
+        </div>
+      )}
+
       {/* Canvas host */}
-      <div ref={hostRef} className="aoe-canvasHost" />
+      <div ref={hostRef} style={{ flex: 1, visibility: hasEntered ? "visible" : "hidden" }} />
 
       {/* Building card modal (view-only) */}
       {isBuildingCardOpen && cardTier && (
@@ -490,10 +634,14 @@ export default function Home() {
               // Try to resolve avatar (same special-case as admin)
               const players = (payloadRef.current as any)?.players as Record<string, PlayerRec> | undefined;
               const found = players
-                ? Object.entries(players).find(([, p]) => (p?.tier ?? "") === cardTier)
+                ? Object.entries(players)
+                    .filter(([, p]) => (p?.tier ?? "") === cardTier)
+                    // Make deterministic: prefer u001 if present, else u003, else first
+                    .sort(([a], [b]) => (a === "u001" ? -1 : b === "u001" ? 1 : a === "u003" ? -1 : b === "u003" ? 1 : 0))[0]
                 : undefined;
               const playerId = found?.[0];
-              const avatar = playerId === "u003" ? "/people/tsumi.png" : "";
+              const playerRec = playerId ? (players as any)[playerId] : undefined;
+              const avatar = avatarByPlayerId(playerId, playerRec);
 
               return (
                 <div style={{ display: "flex", gap: 12, alignItems: "flex-start" }}>
@@ -511,14 +659,14 @@ export default function Home() {
                       <img
                         src={avatar}
                         alt="avatar"
-                        style={{ width: "min(240px, 42vw)", height: "min(240px, 42vw)", objectFit: "cover", display: "block" }}
+                        style={{ width: 240, height: 240, objectFit: "cover", display: "block" }}
                       />
                     </div>
                   ) : (
                     <div
                       style={{
-                        width: "min(240px, 42vw)",
-                        height: "min(240px, 42vw)",
+                        width: 240,
+                        height: 240,
                         borderRadius: 28,
                         background: "rgba(255,255,255,0.06)",
                         border: "2px solid rgba(255,255,255,0.14)",
