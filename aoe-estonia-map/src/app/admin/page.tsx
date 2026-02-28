@@ -33,7 +33,7 @@ type TierKey =
 
 type Rect = { x: number; y: number; w: number; h: number };
 
-type PlayerRec = { name?: string; tier?: TierKey | ""; title?: string; desc?: string };
+type PlayerRec = { name?: string; tier?: TierKey | ""; title?: string; desc?: string; avatar?: string };
 
 type MapStatePayloadV1 = {
   world: { w: number; h: number; mapTextureVersion: number };
@@ -242,6 +242,7 @@ export default function AdminMapPage() {
   const [isSavingAssignments, setIsSavingAssignments] = useState(false);
   const [selectedPlayerId, setSelectedPlayerId] = useState<string | null>(null);
   const [previewTier, setPreviewTier] = useState<TierKey | null>(null);
+  const [previewAvatar, setPreviewAvatar] = useState<string | null>(null);
   const previewTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const previewOpenedRef = useRef(false);
   const [isRosterOpen, setIsRosterOpen] = useState(false);
@@ -467,8 +468,59 @@ export default function AdminMapPage() {
       id,
       name: normalizeName(id, p),
       tier: normalizeTier(p),
+      title: (p?.title ?? "").toString().trim(),
     }));
-    res.sort((a, b) => (a.name || "").localeCompare(b.name || "", "ru"));
+
+    // Custom order
+    const TITLE_ORDER = ["Король", "Герцог", "Граф", "Барон"] as const;
+    const TIER_ORDER: TierKey[] = [
+      "Крепости",
+      "Донжоны",
+      "Башня",
+      "Халупа",
+      // variants fall under their base by prefix match below
+    ];
+
+    const titleRank = (t?: string) => {
+      const idx = TITLE_ORDER.indexOf((t ?? "") as any);
+      return idx === -1 ? Number.POSITIVE_INFINITY : idx;
+    };
+    const baseTierKey = (t: TierKey | ""): string => {
+      if (!t) return "zzz";
+      if (t.startsWith("Крепости")) return "Крепости";
+      if (t.startsWith("Донжоны")) return "Донжоны";
+      if (t.startsWith("Башня")) return "Башня";
+      if (t.startsWith("Халупа")) return "Халупа";
+      return t;
+    };
+    const tierRank = (t: TierKey | "") => {
+      const base = baseTierKey(t) as TierKey | string;
+      const idx = TIER_ORDER.indexOf(base as any);
+      return idx === -1 ? Number.POSITIVE_INFINITY : idx;
+    };
+
+    res.sort((a, b) => {
+      // 1) By title order
+      const ta = titleRank(a.title);
+      const tb = titleRank(b.title);
+      if (ta !== tb) return ta - tb;
+
+      // 2) If no prioritized title, sort by tier group order
+      const ga = tierRank(a.tier);
+      const gb = tierRank(b.tier);
+      if (ga !== gb) return ga - gb;
+
+      // 3) Within same group, original tier variants come before (base before v2/v3...)
+      if (a.tier && b.tier) {
+        const ba = baseTierKey(a.tier);
+        const bb = baseTierKey(b.tier);
+        if (ba === bb) return (a.tier || "").localeCompare(b.tier || "", "ru");
+      }
+
+      // 4) Finally by name
+      return (a.name || "").localeCompare(b.name || "", "ru");
+    });
+
     return res;
   }, [effectivePlayers]);
 
@@ -578,14 +630,29 @@ export default function AdminMapPage() {
       };
 
       payloadRef.current = next;
-      await saveMapState(next as any);
-      // Reload from Firestore to ensure merge/write shape doesn't drop fields
-      const reloaded = (await loadMapState()) as any;
-      if (reloaded && reloaded.buildings) {
-        payloadRef.current = reloaded as any;
+      // Save with a timeout guard to avoid indefinite spinner if network stalls
+      try {
+        await Promise.race([
+          saveMapState(next as any),
+          new Promise((_, rej) => setTimeout(() => rej(new Error("save-timeout")), 10000)),
+        ]);
+      } catch (e) {
+        console.warn("[Admin] save error/timeout", e);
       }
+      // Background refresh (non-blocking) to reconcile from DB when ready
+      void (async () => {
+        try {
+          const reloaded = (await loadMapState()) as any;
+          if (reloaded && reloaded.buildings) {
+            payloadRef.current = reloaded as any;
+            setMetaVersion((v) => v + 1);
+          }
+        } catch (e) {
+          console.warn("[Admin] background reload failed", e);
+        }
+      })();
+
       setIsDirty(false);
-      setMetaVersion((v) => v + 1);
       setIsAssignModalOpen(false);
       setStagedPlayers(null);
     } finally {
@@ -896,6 +963,7 @@ export default function AdminMapPage() {
       if (e.key !== "Escape") return;
       previewOpenedRef.current = false;
       setPreviewTier(null);
+      setPreviewAvatar(null);
       setIsAssignModalOpen(false);
       if (previewTimerRef.current) {
         clearTimeout(previewTimerRef.current);
@@ -1195,32 +1263,49 @@ export default function AdminMapPage() {
               const players = (payloadRef.current?.players ?? {}) as Record<string, PlayerRec>;
               const inBuilding = Object.entries(players)
                 .filter(([, p]) => normalizeTier(p) === cardTier)
-                .map(([id, p]) => ({ id, name: normalizeName(id, p), title: p?.title, desc: p?.desc }));
+                .map(([id, p]) => ({ id, name: normalizeName(id, p), title: p?.title, desc: p?.desc, avatar: (p as any)?.avatar }));
 
               if (inBuilding.length === 0) {
                 return <div style={{ opacity: 0.85 }}>Никого нет в этом строении</div>;
               }
 
               const p = inBuilding[0];
-              const avatar = avatarUrlFor(p.name);
+              const avatar = p.id === 'u003' ? '/people/tsumi.png' : (p.avatar ?? avatarUrlFor(p.name));
 
               return (
                 <div style={{ display: "flex", gap: 12, alignItems: "flex-start" }}>
                   {avatar ? (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img
-                      src={avatar}
-                      alt="avatar"
-                      style={{
-                        width: 240,
-                        height: 240,
-                        borderRadius: 28,
-                        objectFit: "cover",
-                        border: "2px solid rgba(202,162,77,0.9)",
-                        boxShadow: "0 10px 30px rgba(0,0,0,0.45)",
-                        flex: "0 0 auto",
+                    <div
+                      role="button"
+                      tabIndex={0}
+                      onClick={() => setPreviewAvatar(avatar)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter" || e.key === " ") {
+                          e.preventDefault();
+                          setPreviewAvatar(avatar);
+                        }
                       }}
-                    />
+                      title="Открыть аватар на весь экран"
+                      style={{
+                        flex: "0 0 auto",
+                        border: "2px solid rgba(202,162,77,0.9)",
+                        borderRadius: 28,
+                        boxShadow: "0 10px 30px rgba(0,0,0,0.45)",
+                        overflow: "hidden",
+                      }}
+                    >
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img
+                        src={avatar}
+                        alt="avatar"
+                        style={{
+                          width: 240,
+                          height: 240,
+                          objectFit: "cover",
+                          display: "block",
+                        }}
+                      />
+                    </div>
                   ) : (
                     <div
                       style={{
@@ -1476,6 +1561,40 @@ export default function AdminMapPage() {
         </div>
       )}
 
+      {/* Fullscreen avatar preview */}
+      {previewAvatar && (
+        <div
+          onClick={() => setPreviewAvatar(null)}
+          onPointerUp={() => setPreviewAvatar(null)}
+          onPointerCancel={() => setPreviewAvatar(null)}
+          style={{
+            position: "fixed",
+            inset: 0,
+            zIndex: 4001,
+            background: "rgba(0,0,0,0.85)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            padding: 24,
+          }}
+        >
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={previewAvatar}
+            alt="avatar"
+            style={{
+              maxWidth: "96vw",
+              maxHeight: "92vh",
+              width: "auto",
+              height: "auto",
+              objectFit: "contain",
+              display: "block",
+              filter: "drop-shadow(0 12px 40px rgba(0,0,0,0.55))",
+            }}
+          />
+        </div>
+      )}
+
       {/* Assignment modal */}
       {isAssignModalOpen && selectedBuilding && (
         <div
@@ -1605,18 +1724,71 @@ export default function AdminMapPage() {
                             background: "rgba(0,0,0,0.15)",
                           }}
                         >
-                          <div
-                            style={{
-                              fontWeight: 800,
-                              flex: 1,
-                              minWidth: 0,
-                              overflow: "hidden",
-                              textOverflow: "ellipsis",
-                              whiteSpace: "nowrap",
-                            }}
-                            title={p.name}
-                          >
-                            {p.name}
+                          {/* avatar + name + building icon */}
+                          <div style={{ display: "flex", alignItems: "center", gap: 8, flex: 1, minWidth: 0 }}>
+                            {/* avatar */}
+                            {(() => {
+                              const rec = (effectivePlayers as any)[p.id] as any;
+                              const av = p.id === 'u003' ? '/people/tsumi.png' : (rec?.avatar ?? avatarUrlFor(p.name));
+                              return av ? (
+                                <div
+                                  role="button"
+                                  tabIndex={0}
+                                  onClick={() => setPreviewAvatar(av)}
+                                  onKeyDown={(e) => {
+                                    if (e.key === "Enter" || e.key === " ") {
+                                      e.preventDefault();
+                                      setPreviewAvatar(av);
+                                    }
+                                  }}
+                                  style={{ width: 28, height: 28, borderRadius: 8, overflow: "hidden", flex: "0 0 auto", cursor: "pointer" }}
+                                  title="Открыть аватар на весь экран"
+                                >
+                                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                                  <img src={av} alt="" style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }} />
+                                </div>
+                              ) : (
+                                <div style={{ width: 28, height: 28, borderRadius: 8, background: "rgba(255,255,255,0.08)", flex: "0 0 auto" }} />
+                              );
+                            })()}
+                            <div
+                              style={{
+                                fontWeight: 800,
+                                minWidth: 0,
+                                overflow: "hidden",
+                                textOverflow: "ellipsis",
+                                whiteSpace: "nowrap",
+                              }}
+                              title={p.name}
+                            >
+                              {p.name}
+                            </div>
+                            <div style={{ flex: 1 }} />
+                            {/* building icon (current list is for selected building) */}
+                            <button
+                              onClick={() => setPreviewTier(selectedBuilding!)}
+                              style={{
+                                width: 24,
+                                height: 24,
+                                padding: 0,
+                                margin: 0,
+                                border: "1px solid rgba(255,255,255,0.12)",
+                                borderRadius: 6,
+                                background: "rgba(0,0,0,0.15)",
+                                cursor: "pointer",
+                                display: "flex",
+                                alignItems: "center",
+                                justifyContent: "center",
+                              }}
+                              title="Открыть иконку строения на весь экран"
+                            >
+                              {/* eslint-disable-next-line @next/next/no-img-element */}
+                              <img
+                                src={TIER_ICON_URL[selectedBuilding!]}
+                                alt={selectedBuilding!}
+                                style={{ width: 20, height: 20, objectFit: "contain", opacity: 0.95, display: "block" }}
+                              />
+                            </button>
                           </div>
                           <button
                             onClick={() => unassignPlayer(p.id)}
@@ -1696,34 +1868,83 @@ export default function AdminMapPage() {
                                 }}
                                 title="Выбрать игрока"
                               >
-                                <span
-                                  style={{
-                                    width: 10,
-                                    height: 10,
-                                    borderRadius: 99,
-                                    background: active ? "#caa24d" : "rgba(255,255,255,0.25)",
-                                    flex: "0 0 auto",
-                                  }}
-                                />
+                                {/* avatar */}
+                                {(() => {
+                                  const rec = (effectivePlayers as any)[p.id] as any;
+                                  const av = p.id === 'u003' ? '/people/tsumi.png' : (rec?.avatar ?? avatarUrlFor(p.name));
+                                  return av ? (
+                                    <div
+                                      role="button"
+                                      tabIndex={0}
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        setPreviewAvatar(av);
+                                      }}
+                                      onKeyDown={(e) => {
+                                        if (e.key === "Enter" || e.key === " ") {
+                                          e.preventDefault();
+                                          e.stopPropagation();
+                                          setPreviewAvatar(av);
+                                        }
+                                      }}
+                                      style={{ width: 28, height: 28, borderRadius: 8, overflow: "hidden", flex: "0 0 auto", cursor: "pointer" }}
+                                      title="Открыть аватар на весь экран"
+                                    >
+                                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                                      <img src={av} alt="" style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }} />
+                                    </div>
+                                  ) : (
+                                    <div style={{ width: 28, height: 28, borderRadius: 8, background: "rgba(255,255,255,0.08)", flex: "0 0 auto" }} />
+                                  );
+                                })()}
                                 <span style={{ minWidth: 0, flex: 1 }}>
-                                  <div
-                                    style={{
-                                      fontWeight: 800,
-                                      overflow: "hidden",
-                                      textOverflow: "ellipsis",
-                                      whiteSpace: "nowrap",
-                                    }}
-                                    title={p.name}
-                                  >
+                                  <div style={{ fontWeight: 800, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={p.name}>
                                     {p.name}
                                   </div>
-                                  <div
-                                    style={{ opacity: 0.7, fontSize: 12, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
-                                    title={p.id}
-                                  >
+                                  <div style={{ opacity: 0.7, fontSize: 12, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={p.id}>
                                     id: {p.id}
                                   </div>
                                 </span>
+                                {/* building icon */}
+                                {p.tier ? (
+                                  <div
+                                    role="button"
+                                    tabIndex={0}
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      setPreviewTier(p.tier!);
+                                    }}
+                                    onKeyDown={(e) => {
+                                      if (e.key === "Enter" || e.key === " ") {
+                                        e.preventDefault();
+                                        e.stopPropagation();
+                                        setPreviewTier(p.tier!);
+                                      }
+                                    }}
+                                    style={{
+                                      width: 26,
+                                      height: 26,
+                                      padding: 0,
+                                      margin: 0,
+                                      border: "1px solid rgba(255,255,255,0.12)",
+                                      borderRadius: 6,
+                                      background: "rgba(0,0,0,0.15)",
+                                      cursor: "pointer",
+                                      display: "flex",
+                                      alignItems: "center",
+                                      justifyContent: "center",
+                                      flex: "0 0 auto",
+                                    }}
+                                    title="Открыть иконку строения на весь экран"
+                                  >
+                                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                                    <img src={TIER_ICON_URL[p.tier]} alt={p.tier} style={{ width: 20, height: 20, objectFit: "contain", display: "block" }} />
+                                  </div>
+                                ) : (
+                                  <div style={{ width: 24, height: 24, flex: "0 0 auto", opacity: 0.6, display: "flex", alignItems: "center", justifyContent: "center" }}>
+                                    <span style={{ fontWeight: 900, fontSize: 14 }}>×</span>
+                                  </div>
+                                )}
                               </button>
 
                               {isRenaming ? (
@@ -1839,39 +2060,7 @@ export default function AdminMapPage() {
                           minWidth: 0,
                         }}
                       >
-                        {editBioPlayerId && (
-                          <div style={{ marginBottom: 10, padding: 10, borderRadius: 10, border: "1px solid #23304a", background: "rgba(26,36,56,0.25)" }}>
-                            <div style={{ fontWeight: 900, marginBottom: 6 }}>Титул</div>
-                            <select
-                              value={editTitleValue}
-                              onChange={(e) => setEditTitleValue(e.target.value)}
-                              style={{ width: "100%", padding: 8, borderRadius: 8, border: "1px solid #3a2a1a", background: "#1a2438", color: "#f7f0df" }}
-                            >
-                              <option value="">(без титула)</option>
-                              <option value="Король">Король</option>
-                              <option value="Герцог">Герцог</option>
-                              <option value="Граф">Граф</option>
-                              <option value="Барон">Барон</option>
-                              <option value="Крепости">Крепости</option>
-                              <option value="Донжоны">Донжоны</option>
-                              <option value="Башни">Башни</option>
-                              <option value="Халупа">Халупа</option>
-                            </select>
-                            <div style={{ height: 10 }} />
-                            <div style={{ fontWeight: 900, marginBottom: 6 }}>Описание</div>
-                            <textarea
-                              value={editDescValue}
-                              onChange={(e) => setEditDescValue(e.target.value)}
-                              placeholder="Описание"
-                              rows={5}
-                              style={{ width: "100%", padding: 8, borderRadius: 8, border: "1px solid #3a2a1a", background: "#1a2438", color: "#f7f0df", resize: "vertical" }}
-                            />
-                            <div style={{ marginTop: 8, opacity: 0.75, fontSize: 12 }}>
-                              Выберите игрока слева, укажите титул и описание, затем нажмите <b>Сохранить</b>. Отдельно нажимать ✓ не требуется.
-                            </div>
-                          </div>
-                        )}
-                        {!selectedPlayerId ? (
+                                                {!selectedPlayerId ? (
                           <div style={{ opacity: 0.85, lineHeight: 1.35 }}>
                             Сначала выберите игрока слева —
                             <br />

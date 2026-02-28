@@ -62,14 +62,44 @@ export async function saveMapState(payload: MapStatePayloadV1): Promise<void> {
   const db = getDb();
   if (!db) return;
 
-  const data: FirestoreDoc = {
+  const ref = doc(db, DOC_PATH);
+
+  // Load current doc to protect existing players from accidental wipe
+  let existingPlayers: MapStatePayloadV1["players"] | undefined;
+  try {
+    const snap = await getDoc(ref);
+    if (snap.exists()) {
+      const data = snap.data() as Partial<FirestoreDoc> | undefined;
+      const prevPayload = data?.payload as MapStatePayloadV1 | undefined;
+      existingPlayers = prevPayload?.players;
+    }
+  } catch {}
+
+  const incomingPlayers = payload?.players ?? {};
+  const incomingPlayersCount = Object.keys(incomingPlayers || {}).length;
+  const existingPlayersCount = Object.keys(existingPlayers || {}).length;
+
+  // Safety: if incoming players is empty while existing has data, skip writing players field at all
+  const skipPlayersWrite = incomingPlayersCount === 0 && existingPlayersCount > 0;
+
+  // Build a partial nested object with merge to avoid destructive overwrites
+  const partial: any = {
     version: 1,
-    payload,
     updatedAt: serverTimestamp(),
+    payload: {
+      world: payload.world,
+      buildings: payload.buildings,
+    },
   };
-  // Write full document to avoid keeping stale nested payload fields from previous versions.
-  // This is important for players: admin stores extra fields (title/desc/name), which would not reliably persist with merge.
-  await setDoc(doc(db, DOC_PATH), data);
+  // meta may be used by admin UI; persist if present
+  if ((payload as any)?.meta) {
+    partial.payload.meta = (payload as any).meta;
+  }
+  if (!skipPlayersWrite) {
+    partial.payload.players = incomingPlayers;
+  }
+
+  await setDoc(ref, partial, { merge: true });
 }
 
 export function debounce<T extends (...args: any[]) => void>(fn: T, ms: number) {
