@@ -36,7 +36,15 @@ type TierKey =
 
 type Rect = { x: number; y: number; w: number; h: number };
 
-type PlayerRec = { name?: string; tier?: TierKey | ""; title?: string; desc?: string; avatar?: string };
+type PlayerRec = {
+  name?: string;
+  tier?: TierKey | "";
+  title?: string;
+  desc?: string;
+  avatar?: string;
+  // AOE2 Insights numeric user id (string to avoid accidental formatting changes)
+  insightsUserId?: string;
+};
 
 const avatarByPlayerId = (playerId?: string, rec?: PlayerRec | null): string => {
   if (!playerId) return "";
@@ -251,6 +259,7 @@ export default function AdminMapPage() {
   const [editBioPlayerId, setEditBioPlayerId] = useState<string | null>(null);
   const [editTitleValue, setEditTitleValue] = useState("");
   const [editDescValue, setEditDescValue] = useState("");
+  const [editInsightsUserIdValue, setEditInsightsUserIdValue] = useState("");
   const [stagedPlayers, setStagedPlayers] = useState<Record<string, PlayerRec> | null>(null);
   const [isSavingAssignments, setIsSavingAssignments] = useState(false);
   const [selectedPlayerId, setSelectedPlayerId] = useState<string | null>(null);
@@ -676,6 +685,19 @@ export default function AdminMapPage() {
     setIsDirty(true);
   }, []);
 
+  const updatePlayerInsightsUserId = useCallback((playerId: string, nextInsightsUserId: string) => {
+    setStagedPlayers((cur) => {
+      const base = cur ?? ({ ...((payloadRef.current?.players ?? {}) as any) } as any);
+      const prev = (base as any)[playerId];
+      if (!prev) return base;
+      const v = nextInsightsUserId.trim();
+      const insightsUserId = v ? v : undefined;
+      return { ...base, [playerId]: { ...prev, insightsUserId } };
+    });
+
+    setIsDirty(true);
+  }, []);
+
   // НЕ удаляем игрока из БД полностью — только снимаем со строения
   const unassignPlayer = useCallback(
     (playerId: string) => {
@@ -713,6 +735,8 @@ export default function AdminMapPage() {
           if (editBioPlayerId && id === editBioPlayerId) {
             cloned.title = editTitleValue;
             cloned.desc = editDescValue;
+            const v = editInsightsUserIdValue.trim();
+            cloned.insightsUserId = v ? v : undefined;
           }
           return [id, cloned];
         })
@@ -763,7 +787,7 @@ export default function AdminMapPage() {
     } finally {
       setIsSavingAssignments(false);
     }
-  }, [stagedPlayers, tierRename, editBioPlayerId, editTitleValue, editDescValue]);
+  }, [stagedPlayers, tierRename, editBioPlayerId, editTitleValue, editDescValue, editInsightsUserIdValue]);
 
   useEffect(() => {
     const hostEl = hostRef.current;
@@ -2354,6 +2378,7 @@ export default function AdminMapPage() {
                                         const cur = (effectivePlayers as any)[selectedPlayerId!] ?? {};
                                         setEditTitleValue((cur?.title ?? "").toString());
                                         setEditDescValue((cur?.desc ?? "").toString());
+                                        setEditInsightsUserIdValue((cur?.insightsUserId ?? "").toString());
                                       }
 
                                       setEditBioPlayerId(selectedPlayerId);
@@ -2387,6 +2412,7 @@ export default function AdminMapPage() {
                                         const cur = (effectivePlayers as any)[selectedPlayerId!] ?? {};
                                         setEditTitleValue((cur?.title ?? "").toString());
                                         setEditDescValue((cur?.desc ?? "").toString());
+                                        setEditInsightsUserIdValue((cur?.insightsUserId ?? "").toString());
                                       }
 
                                       setEditBioPlayerId(selectedPlayerId);
@@ -2403,6 +2429,44 @@ export default function AdminMapPage() {
                                     rows={4}
                                     style={{ width: "100%", padding: 8, borderRadius: 8, border: "1px solid #3a2a1a", background: "#1a2438", color: "#f7f0df", resize: "vertical" }}
                                   />
+
+                                  <div style={{ marginTop: 12 }}>
+                                    <div style={{ fontWeight: 900, marginBottom: 6 }}>AOE2 Insights userId</div>
+                                    <input
+                                      value={
+                                        editBioPlayerId === selectedPlayerId
+                                          ? editInsightsUserIdValue
+                                          : ((effectivePlayers as any)[selectedPlayerId!]?.insightsUserId ?? "")
+                                      }
+                                      onChange={(e) => {
+                                        const val = e.target.value;
+
+                                        if (editBioPlayerId !== selectedPlayerId) {
+                                          const cur = (effectivePlayers as any)[selectedPlayerId!] ?? {};
+                                          setEditTitleValue((cur?.title ?? "").toString());
+                                          setEditDescValue((cur?.desc ?? "").toString());
+                                          setEditInsightsUserIdValue((cur?.insightsUserId ?? "").toString());
+                                        }
+
+                                        setEditBioPlayerId(selectedPlayerId);
+                                        setEditInsightsUserIdValue(val);
+                                        updatePlayerInsightsUserId(selectedPlayerId!, val);
+                                      }}
+                                      placeholder="например 4207889"
+                                      inputMode="numeric"
+                                      style={{
+                                        width: "100%",
+                                        padding: 8,
+                                        borderRadius: 8,
+                                        border: "1px solid #3a2a1a",
+                                        background: "#1a2438",
+                                        color: "#f7f0df",
+                                      }}
+                                    />
+                                    <div style={{ opacity: 0.75, fontSize: 12, marginTop: 6, lineHeight: 1.35 }}>
+                                      Если пусто — будет использован fallback из id игрока (u001 → 1).
+                                    </div>
+                                  </div>
                                   <div style={{ marginTop: 6, opacity: 0.7, fontSize: 12 }}>Будет сохранено с основной кнопкой «Сохранить».</div>
                                 </div>
 
