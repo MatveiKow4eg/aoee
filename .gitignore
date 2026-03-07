@@ -18,6 +18,10 @@ Thumbs.db
 out
 dist
 coverage
+*.tsbuildinfo
+.turbo
+.vite
+.next/cache
 
 # Dependencies
 node_modules
@@ -25,9 +29,24 @@ node_modules
 # IDE
 .vscode
 .idea
+*.swp
 
 # Monorepo folders
 frontend/node_modules
 backend/node_modules
 frontend/.next
 backend/dist
+
+# Prisma
+backend/prisma/dev.db
+backend/prisma/dev.db-journal
+backend/prisma/*.db
+backend/prisma/*.db-journal
+backend/prisma/.env
+
+# Local data
+backend/uploads/
+backend/tmp/
+
+# Secrets / local seed data
+backend/prisma/seed-aoe-players.json
