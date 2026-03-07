@@ -1,8 +1,8 @@
-const API_BASE =
+const API_ORIGIN =
   process.env.NEXT_PUBLIC_API_BASE_URL ||
-  (process.env.NODE_ENV !== "production" ? "http://localhost:3001/api" : "");
+  (process.env.NODE_ENV !== "production" ? "http://localhost:3001" : "");
 
-if (!API_BASE) {
+if (!API_ORIGIN) {
   throw new Error(
     "NEXT_PUBLIC_API_BASE_URL is not set (required in production to avoid localhost requests)."
   );
@@ -22,7 +22,7 @@ export async function listAvailableAoePlayers(args?: { q?: string; limit?: numbe
   if (args?.limit) sp.set("limit", String(args.limit));
   if (args?.cursor) sp.set("cursor", String(args.cursor));
 
-  const res = await fetch(`${API_BASE}/aoe-players/available${sp.toString() ? `?${sp.toString()}` : ""}`, {
+  const res = await fetch(`${API_ORIGIN}/api/aoe-players/available${sp.toString() ? `?${sp.toString()}` : ""}`, {
     method: "GET",
     headers: { Accept: "application/json" },
     cache: "no-store",
@@ -38,7 +38,7 @@ export async function listAvailableAoePlayers(args?: { q?: string; limit?: numbe
 }
 
 export async function claimAoePlayer(input: { aoeProfileId: string; nickname?: string }) {
-  const res = await fetch(`${API_BASE}/aoe-players/claim`, {
+  const res = await fetch(`${API_ORIGIN}/api/aoe-players/claim`, {
     method: "POST",
     headers: { Accept: "application/json", "Content-Type": "application/json" },
     cache: "no-store",

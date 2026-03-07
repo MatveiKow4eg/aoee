@@ -1,17 +1,17 @@
 import type { MapStatePayloadV1 } from "../../store/mapStateStore";
 
-const API_BASE =
+const API_ORIGIN =
   process.env.NEXT_PUBLIC_API_BASE_URL ||
-  (process.env.NODE_ENV !== "production" ? "http://localhost:3001/api" : "");
+  (process.env.NODE_ENV !== "production" ? "http://localhost:3001" : "");
 
-if (!API_BASE) {
+if (!API_ORIGIN) {
   throw new Error(
     "NEXT_PUBLIC_API_BASE_URL is not set (required in production to avoid localhost requests)."
   );
 }
 
 export async function getDefaultMap(): Promise<MapStatePayloadV1> {
-  const res = await fetch(`${API_BASE}/maps/default`, {
+  const res = await fetch(`${API_ORIGIN}/api/maps/default`, {
     method: "GET",
     headers: { Accept: "application/json" },
     cache: "no-store",
@@ -28,7 +28,7 @@ export async function getDefaultMap(): Promise<MapStatePayloadV1> {
 }
 
 export async function putDefaultMap(payload: MapStatePayloadV1): Promise<MapStatePayloadV1> {
-  const res = await fetch(`${API_BASE}/maps/default`, {
+  const res = await fetch(`${API_ORIGIN}/api/maps/default`, {
     method: "PUT",
     headers: { "Content-Type": "application/json", Accept: "application/json" },
     body: JSON.stringify({ version: 1, payload }),

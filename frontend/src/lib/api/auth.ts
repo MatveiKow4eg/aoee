@@ -1,8 +1,8 @@
-const API_BASE =
+const API_ORIGIN =
   process.env.NEXT_PUBLIC_API_BASE_URL ||
-  (process.env.NODE_ENV !== "production" ? "http://localhost:3001/api" : "");
+  (process.env.NODE_ENV !== "production" ? "http://localhost:3001" : "");
 
-if (!API_BASE) {
+if (!API_ORIGIN) {
   throw new Error(
     "NEXT_PUBLIC_API_BASE_URL is not set (required in production to avoid localhost requests)."
   );
@@ -18,7 +18,7 @@ export type MeResponse = {
 };
 
 async function jsonFetch<T>(path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(`${API_BASE}${path}`, {
+  const res = await fetch(`${API_ORIGIN}${path}`, {
     ...init,
     headers: {
       Accept: "application/json",
@@ -38,27 +38,27 @@ async function jsonFetch<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 export async function me(): Promise<MeResponse> {
-  return jsonFetch<MeResponse>("/api/v1/auth/me", { method: "GET", cache: "no-store" });
+  return jsonFetch<MeResponse>("/api/auth/me", { method: "GET", cache: "no-store" });
 }
 
 export async function register(email: string, password: string): Promise<void> {
-  await jsonFetch("/api/v1/auth/register", {
+  await jsonFetch("/api/auth/register", {
     method: "POST",
     body: JSON.stringify({ email, password }),
   });
 }
 
 export async function login(email: string, password: string): Promise<void> {
-  await jsonFetch("/api/v1/auth/login", {
+  await jsonFetch("/api/auth/login", {
     method: "POST",
     body: JSON.stringify({ email, password }),
   });
 }
 
 export async function logout(): Promise<void> {
-  await jsonFetch("/api/v1/auth/logout", { method: "POST" });
+  await jsonFetch("/api/auth/logout", { method: "POST" });
 }
 
 export function steamLoginUrl(): string {
-  return `${API_BASE}/api/v1/auth/steam`;
+  return `${API_ORIGIN}/api/auth/steam`;
 }
