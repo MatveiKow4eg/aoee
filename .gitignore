@@ -1,7 +1,12 @@
 # Root
+# dotenv files (ignore secrets; keep *.example anywhere)
 .env
+.env.local
+.env.*.local
 .env.*
-!.env.example
+*.env
+!**/.env.example
+!**/.env.*.example
 
 # Logs
 npm-debug.log*
@@ -22,6 +27,7 @@ coverage
 .turbo
 .vite
 .next/cache
+.vercel
 
 # Dependencies
 node_modules
