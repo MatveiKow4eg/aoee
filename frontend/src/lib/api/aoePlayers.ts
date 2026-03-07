@@ -1,4 +1,12 @@
-const API_BASE = process.env.NEXT_PUBLIC_BACKEND_API_BASE || "http://localhost:3001/api";
+const API_BASE =
+  process.env.NEXT_PUBLIC_API_BASE_URL ||
+  (process.env.NODE_ENV !== "production" ? "http://localhost:3001/api" : "");
+
+if (!API_BASE) {
+  throw new Error(
+    "NEXT_PUBLIC_API_BASE_URL is not set (required in production to avoid localhost requests)."
+  );
+}
 
 export type AoePlayer = {
   id: string;
