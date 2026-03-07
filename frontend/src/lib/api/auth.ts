@@ -38,27 +38,27 @@ async function jsonFetch<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 export async function me(): Promise<MeResponse> {
-  return jsonFetch<MeResponse>("/api/auth/me", { method: "GET", cache: "no-store" });
+  return jsonFetch<MeResponse>("/api/v1/auth/me", { method: "GET", cache: "no-store" });
 }
 
 export async function register(email: string, password: string): Promise<void> {
-  await jsonFetch("/api/auth/register", {
+  await jsonFetch("/api/v1/auth/register", {
     method: "POST",
     body: JSON.stringify({ email, password }),
   });
 }
 
 export async function login(email: string, password: string): Promise<void> {
-  await jsonFetch("/api/auth/login", {
+  await jsonFetch("/api/v1/auth/login", {
     method: "POST",
     body: JSON.stringify({ email, password }),
   });
 }
 
 export async function logout(): Promise<void> {
-  await jsonFetch("/api/auth/logout", { method: "POST" });
+  await jsonFetch("/api/v1/auth/logout", { method: "POST" });
 }
 
 export function steamLoginUrl(): string {
-  return `${API_BASE}/api/auth/steam`;
+  return `${API_BASE}/api/v1/auth/steam`;
 }
