@@ -32,7 +32,7 @@ function extractSteamId(claimedId: string | undefined | null): string | null {
 
 export const steamAuthStart: RequestHandler = async (req, res, next) => {
   try {
-    const returnTo = new URL('/api/auth/steam/callback', `${req.protocol}://${req.get('host')}`).toString();
+    const returnTo = 'https://api.aoeestonia.ee/api/auth/steam/callback';
 
     const nonce = randomUUID();
     nonces.set(nonce, Date.now());
