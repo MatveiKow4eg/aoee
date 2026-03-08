@@ -21,6 +21,18 @@ export class AoePlayerService {
     return this.repo.listAvailable({ q, limit, cursor: cursor ?? null });
   }
 
+  // Given a list of aoeProfileIds, return a Set of those that are currently unclaimed.
+  async filterUnclaimedByProfileIds(aoeProfileIds: string[]) {
+    const ids = Array.from(new Set(aoeProfileIds.map((s) => String(s || '').trim()).filter(Boolean)));
+    if (ids.length === 0) return { unclaimedAoeProfileIds: new Set<string>() };
+
+    // Query claimed ones in a single call and subtract.
+    const claimed = await this.repo.findClaimedByAoeProfileIds(ids);
+    const claimedSet = new Set(claimed.map((r) => r.aoeProfileId));
+    const unclaimed = new Set(ids.filter((id) => !claimedSet.has(id)));
+    return { unclaimedAoeProfileIds: unclaimed };
+  }
+
   async claimForCurrentUser(userId: string, body: unknown) {
     const { aoeProfileId, nickname } = claimSchema.parse(body);
 

@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import rateLimit from 'express-rate-limit';
-import { getAvailableAoePlayers, postClaimAoePlayer } from '../controllers/aoePlayerController';
+import { getAvailableAoePlayers, getClaimablePlayersFromMap, postClaimAoePlayer } from '../controllers/aoePlayerController';
 import { requireAuth } from '../middleware/auth';
 
 export const aoePlayerRoutes = Router();
@@ -20,6 +20,8 @@ const claimLimiter = rateLimit({
 });
 
 aoePlayerRoutes.get('/aoe-players/available', listLimiter, getAvailableAoePlayers);
-// requires login
+// New: claimable players directly from current map payload (excluding already-claimed)
+aoePlayerRoutes.get('/aoe-players/claimable-from-map', listLimiter, getClaimablePlayersFromMap);
 
+// requires login
 aoePlayerRoutes.post('/aoe-players/claim', claimLimiter, requireAuth(), postClaimAoePlayer);

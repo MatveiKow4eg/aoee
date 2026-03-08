@@ -37,6 +37,22 @@ export async function listAvailableAoePlayers(args?: { q?: string; limit?: numbe
   return (await res.json()) as { items: AoePlayer[]; nextCursor: string | null };
 }
 
+export async function listClaimablePlayersFromMap(): Promise<{ items: { name: string; insightsUserId: string }[] }> {
+  const res = await fetch(`${API_ORIGIN}/api/aoe-players/claimable-from-map`, {
+    method: "GET",
+    headers: { Accept: "application/json" },
+    cache: "no-store",
+    credentials: "include",
+  });
+
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    throw new Error(`Failed to load claimable players: ${res.status} ${text}`);
+  }
+
+  return (await res.json()) as { items: { name: string; insightsUserId: string }[] };
+}
+
 export async function claimAoePlayer(input: { aoeProfileId: string; nickname?: string }) {
   const res = await fetch(`${API_ORIGIN}/api/aoe-players/claim`, {
     method: "POST",

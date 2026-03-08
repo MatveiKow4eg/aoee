@@ -37,6 +37,14 @@ export class AoePlayerRepository {
     return { items, nextCursor };
   }
 
+  async findClaimedByAoeProfileIds(aoeProfileIds: string[]) {
+    if (aoeProfileIds.length === 0) return [] as { aoeProfileId: string }[];
+    return prisma.aoePlayer.findMany({
+      where: { aoeProfileId: { in: aoeProfileIds }, NOT: { claimedByUserId: null } },
+      select: { aoeProfileId: true },
+    });
+  }
+
   async claimByAoeProfileId(args: { userId: string; aoeProfileId: string }) {
     const { userId, aoeProfileId } = args;
 

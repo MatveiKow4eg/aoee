@@ -4,8 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { me } from "../../lib/api/auth";
-import { claimAoePlayer, type AoePlayer } from "../../lib/api/aoePlayers";
-import { loadMapState } from "../../store/mapStateStore";
+import { claimAoePlayer, listClaimablePlayersFromMap, type AoePlayer } from "../../lib/api/aoePlayers";
 
 export default function ClaimPlayerPage() {
   const router = useRouter();
@@ -57,23 +56,8 @@ export default function ClaimPlayerPage() {
     setIsLoading(true);
 
     try {
-      const pl = (await loadMapState()) as any;
-      const payload = pl && (pl as any).payload ? (pl as any).payload : pl;
-      const players = (payload as any)?.players as Record<string, any> | undefined;
-      if (!players) {
-        setMapPlayers([]);
-        return;
-      }
-
-      const res = Object.values(players)
-        .map((p) => ({
-          name: String(p?.name ?? "").trim(),
-          insightsUserId: String(p?.insightsUserId ?? "").trim(),
-        }))
-        .filter((p) => p.name && p.insightsUserId);
-
-      res.sort((a, b) => a.name.localeCompare(b.name, "ru"));
-      setMapPlayers(res);
+      const { items } = await listClaimablePlayersFromMap();
+      setMapPlayers(items);
     } catch (e: any) {
       setError(e?.message ? String(e.message) : "Failed to load players");
       setMapPlayers([]);
@@ -132,7 +116,7 @@ export default function ClaimPlayerPage() {
         </div>
 
         <div style={{ marginTop: 12, opacity: 0.85, fontSize: 12 }}>
-          Players shown here are taken from the current map payload and filtered by the presence of <code>insightsUserId</code>.
+          Players shown here come from the current map payload and exclude AoE2Insights users already claimed by someone else.
         </div>
 
         {error && (
