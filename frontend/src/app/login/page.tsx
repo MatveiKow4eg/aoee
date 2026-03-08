@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useMemo, useState } from "react";
-import { login, steamLoginUrl } from "../../lib/api/auth";
+import { login, me, steamLoginUrl } from "../../lib/api/auth";
 
 function LoginInner() {
   const router = useRouter();
@@ -37,6 +37,13 @@ function LoginInner() {
             setIsSubmitting(true);
             try {
               await login(email.trim().toLowerCase(), password);
+
+              // Do not consider login successful until cookie-based session is confirmed.
+              const r = await me();
+              if (!r?.user) {
+                throw new Error("Session was not established");
+              }
+
               router.push(nextUrl);
             } catch (err: any) {
               setError(err?.message ? String(err.message) : "Login failed");
