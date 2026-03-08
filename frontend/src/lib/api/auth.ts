@@ -15,6 +15,7 @@ export type MeResponse = {
     displayName?: string | null;
     role?: string | null;
     steamConnected?: boolean;
+    providers?: string[];
   } | null;
 };
 

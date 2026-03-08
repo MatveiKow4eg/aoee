@@ -10,6 +10,11 @@ export class AuthRepository {
     return !!acc;
   }
 
+  async listAccountProviders(userId: string): Promise<string[]> {
+    const rows = await prisma.account.findMany({ where: { userId }, select: { provider: true } });
+    return rows.map((r) => r.provider);
+  }
+
   async findUserById(userId: string) {
     return prisma.user.findUnique({ where: { id: userId } });
   }

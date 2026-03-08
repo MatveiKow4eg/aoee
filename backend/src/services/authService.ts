@@ -11,6 +11,7 @@ export type PublicUser = {
   role?: string | null;
 
   steamConnected?: boolean;
+  providers?: string[];
 
   // Legacy AoE2Insights fields (compat)
   aoeProfileId?: string | null;
@@ -100,8 +101,10 @@ export class AuthService {
     if (!session.user.isActive) return { user: null as PublicUser | null };
 
     const claimed = await this.repo.findAoePlayerClaimedByUserId(session.user.id);
-    const steamConnected = await this.repo.hasSteamAccount(session.user.id);
-    return { user: this.toPublicUser(session.user, claimed, { steamConnected }) };
+    const providers = await this.repo.listAccountProviders(session.user.id);
+    const steamConnected = providers.includes('steam');
+
+    return { user: this.toPublicUser(session.user, claimed, { steamConnected, providers }) };
   }
 
   async logout(token: string | null) {
@@ -116,7 +119,7 @@ export class AuthService {
     }
   }
 
-  private toPublicUser(user: any, claimed?: any | null, extra?: { steamConnected?: boolean }): PublicUser {
+  private toPublicUser(user: any, claimed?: any | null, extra?: { steamConnected?: boolean; providers?: string[] }): PublicUser {
     return {
       id: user.id,
       email: user.email,
@@ -124,6 +127,7 @@ export class AuthService {
       role: user.role,
 
       steamConnected: extra?.steamConnected ?? false,
+      providers: extra?.providers ?? [],
 
       aoeProfileId: user.aoeProfileId ?? null,
       aoeProfileUrl: user.aoeProfileUrl ?? null,

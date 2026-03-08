@@ -269,7 +269,8 @@ export default function Home() {
         if (cancelled) return;
         const ok = !!r?.user;
         setIsAuthed(ok);
-        setSteamConnected(!!(r as any)?.user?.steamConnected);
+        const providers = ((r as any)?.user?.providers ?? []) as string[];
+        setSteamConnected(providers.includes("steam") || !!(r as any)?.user?.steamConnected);
         setAuthChecked(true);
         if (!ok) {
           router.replace(`/login?next=${encodeURIComponent(nextUrl)}`);
