@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import * as cheerio from "cheerio";
+import type { AnyNode } from "domhandler";
 
 export const runtime = "nodejs";
 
@@ -106,7 +107,7 @@ function bestPickFromName(kind: "civ" | "map" | "position", name: string | null)
   };
 }
 
-function safeParseFromCard(card: cheerio.Cheerio<cheerio.Element>, notes: string[]): Omit<BestPick, "imageUrl" | "upstreamImageUrl"> {
+function safeParseFromCard(card: cheerio.Cheerio<AnyNode>, notes: string[]): Omit<BestPick, "imageUrl" | "upstreamImageUrl"> {
   // In upstream HTML, the meaningful data is inside .stat-name and .stat-value
   const name = normalizeText(card.find(".stat-name").first().text()) || null;
   const value = normalizeText(card.find(".stat-value").first().text()) || null;
@@ -197,7 +198,7 @@ export async function GET(req: Request) {
     });
 
     // Build quick index by normalized header
-    const byHeader = new Map<string, cheerio.Cheerio<cheerio.Element>>();
+    const byHeader = new Map<string, cheerio.Cheerio<AnyNode>>();
     cards.each((_, el) => {
       const card = $(el);
       const header = normalizeKey(card.find("header.card-header-muted").first().text());
