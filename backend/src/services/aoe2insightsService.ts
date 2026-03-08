@@ -231,7 +231,9 @@ export async function aoe2InsightsSearchByNicknameDetailed(nicknameRaw: string):
     const stack = e?.stack ? String(e.stack) : undefined;
 
     // AbortError typically means timeout.
-    const reason: Aoe2InsightsSearchResult['reason'] = message.toLowerCase().includes('aborted') ? 'aoe_search_timeout' : 'aoe_search_network_error';
+    const reason: NonNullable<Extract<Aoe2InsightsSearchResult, { ok: false }>['reason']> = message.toLowerCase().includes('aborted')
+      ? 'aoe_search_timeout'
+      : 'aoe_search_network_error';
 
     log('search_error', { reason, message, stack });
 
