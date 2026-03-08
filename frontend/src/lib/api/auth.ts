@@ -14,6 +14,7 @@ export type MeResponse = {
     email?: string | null;
     displayName?: string | null;
     role?: string | null;
+    steamConnected?: boolean;
   } | null;
 };
 
@@ -60,5 +61,9 @@ export async function logout(): Promise<void> {
 }
 
 export function steamLoginUrl(): string {
-  return `${API_ORIGIN}/api/auth/steam`;
+  return `${API_ORIGIN}/api/auth/steam?mode=login`;
+}
+
+export function steamLinkUrl(): string {
+  return `${API_ORIGIN}/api/auth/steam?mode=link`;
 }

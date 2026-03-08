@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import * as PIXI from "pixi.js";
 import { Viewport } from "pixi-viewport";
 import { loadMapState } from "../store/mapStateStore";
-import { me } from "../lib/api/auth";
+import { me, steamLinkUrl } from "../lib/api/auth";
 
 // ========== Types ==========
 
@@ -204,6 +204,7 @@ export default function Home() {
   // Auth gate
   const [authChecked, setAuthChecked] = useState(false);
   const [isAuthed, setIsAuthed] = useState(false);
+  const [steamConnected, setSteamConnected] = useState<boolean>(false);
   const nextUrl = useMemo(() => "/", []);
   const [isDetailsOpen, setIsDetailsOpen] = useState(false);
   const [isStatsOpen, setIsStatsOpen] = useState(false);
@@ -268,6 +269,7 @@ export default function Home() {
         if (cancelled) return;
         const ok = !!r?.user;
         setIsAuthed(ok);
+        setSteamConnected(!!(r as any)?.user?.steamConnected);
         setAuthChecked(true);
         if (!ok) {
           router.replace(`/login?next=${encodeURIComponent(nextUrl)}`);
@@ -701,7 +703,48 @@ export default function Home() {
           pointerEvents: "none",
         }}
       >
-        authChecked={String(authChecked)} isAuthed={String(isAuthed)} isLoading={String(isLoading)} isLoaded={String(isLoaded)} hasEntered={String(hasEntered)} hostReady={String(hostReady)} stage={debugStage}{debugError ? ` error=${debugError}` : ""}
+        authChecked={String(authChecked)} isAuthed={String(isAuthed)} steamConnected={String(steamConnected)} isLoading={String(isLoading)} isLoaded={String(isLoaded)} hasEntered={String(hasEntered)} hostReady={String(hostReady)} stage={debugStage}{debugError ? ` error=${debugError}` : ""}
+      </div>
+
+      {/* Steam connection status / link button */}
+      <div
+        style={{
+          position: "fixed",
+          right: 12,
+          top: 12,
+          zIndex: 99998,
+          display: "flex",
+          alignItems: "center",
+          gap: 10,
+          padding: "8px 10px",
+          borderRadius: 12,
+          background: "rgba(0,0,0,0.45)",
+          border: "1px solid rgba(255,255,255,0.15)",
+          color: "rgba(255,255,255,0.92)",
+          backdropFilter: "blur(6px)",
+        }}
+      >
+        <div style={{ fontWeight: 900, fontSize: 12 }}>
+          Steam: {steamConnected ? "Connected" : "Not connected"}
+        </div>
+        {!steamConnected && (
+          <a
+            href={steamLinkUrl()}
+            style={{
+              padding: "6px 10px",
+              borderRadius: 10,
+              border: "1px solid rgba(202,162,77,0.9)",
+              background: "rgba(202,162,77,0.18)",
+              color: "#f7f0df",
+              fontWeight: 900,
+              textDecoration: "none",
+              whiteSpace: "nowrap",
+            }}
+            title="Link Steam to your current account"
+          >
+            Connect Steam
+          </a>
+        )}
       </div>
       {/* Loader / Enter overlay */}
       {!hasEntered && (

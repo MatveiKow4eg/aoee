@@ -5,6 +5,11 @@ export class AuthRepository {
     return prisma.user.findUnique({ where: { email } });
   }
 
+  async hasSteamAccount(userId: string) {
+    const acc = await prisma.account.findFirst({ where: { userId, provider: 'steam' }, select: { id: true } });
+    return !!acc;
+  }
+
   async findUserById(userId: string) {
     return prisma.user.findUnique({ where: { id: userId } });
   }

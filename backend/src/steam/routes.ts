@@ -18,6 +18,10 @@ const auth = new AuthService(repo);
 // Simple in-memory nonce store to mitigate replay (for demo; replace with Redis/DB in prod)
 const nonces = new Map<string, number>();
 
+type SteamAuthMode = 'login' | 'link';
+// state -> { ts, mode, userId? }
+const steamStates = new Map<string, { ts: number; mode: SteamAuthMode; userId?: string }>();
+
 function frontendRedirectUrl() {
   const { frontendBaseUrl } = getAuthConfig();
   return frontendBaseUrl || 'http://localhost:3000/login';
@@ -32,16 +36,31 @@ function extractSteamId(claimedId: string | undefined | null): string | null {
 
 export const steamAuthStart: RequestHandler = async (req, res, next) => {
   try {
-    const returnTo = 'https://api.aoeestonia.ee/api/auth/steam/callback';
+    // mode=login (default): normal Steam sign-in
+    // mode=link: link Steam to currently authenticated user
+    const modeRaw = typeof req.query.mode === 'string' ? req.query.mode : undefined;
+    const mode: SteamAuthMode = modeRaw === 'link' ? 'link' : 'login';
+
+    const currentUser = (req as any).user as { id: string } | null;
+    if (mode === 'link' && !currentUser) {
+      return res.status(401).send('Unauthorized');
+    }
+
+    // Return URL must match what's configured in Steam (prod), but in dev we want localhost.
+    // Prefer deriving it from config/request to avoid hard-coding production.
+    const { apiBaseUrl } = getAuthConfig();
+    const derivedBase = apiBaseUrl || `${req.protocol}://${req.get('host')}`;
+    const returnTo = `${derivedBase}/api/auth/steam/callback`;
 
     const nonce = randomUUID();
     nonces.set(nonce, Date.now());
+    steamStates.set(nonce, { ts: Date.now(), mode, ...(mode === 'link' ? { userId: currentUser!.id } : {}) });
 
     const params = new URLSearchParams({
       'openid.ns': OPENID_NS,
       'openid.mode': 'checkid_setup',
       'openid.return_to': returnTo + `?state=${nonce}`,
-      'openid.realm': `${req.protocol}://${req.get('host')}`,
+      'openid.realm': derivedBase,
       'openid.identity': OPENID_IDENTITY,
       'openid.claimed_id': OPENID_IDENTITY,
     });
@@ -77,11 +96,17 @@ export const steamAuthCallback: RequestHandler = async (req, res, next) => {
     // Validate state (nonce)
     const state = String(req.query.state || '');
     const ts = nonces.get(state);
-    if (!ts || Date.now() - ts > 5 * 60 * 1000) {
-      log('invalid_state', { state, hasTs: !!ts });
+    const st = steamStates.get(state);
+    if (!ts || !st || Date.now() - ts > 5 * 60 * 1000 || Date.now() - st.ts > 5 * 60 * 1000) {
+      log('invalid_state', { state, hasTs: !!ts, hasState: !!st });
       return res.status(400).send('Invalid state');
     }
     nonces.delete(state);
+    steamStates.delete(state);
+
+    const mode: SteamAuthMode = st.mode;
+    const linkUserId = st.userId;
+    log('mode', { mode, linkUserId: linkUserId ?? null });
 
     // Perform OpenID check_authentication
     const params = new URLSearchParams();
@@ -111,12 +136,41 @@ export const steamAuthCallback: RequestHandler = async (req, res, next) => {
     log('steam_id_extracted', { claimedId, steamId });
     if (!steamId) return res.status(400).send('Missing steamId');
 
-    // Find or create user by steamId
-    let user = await repo.findUserBySteamId(steamId);
-    log('user_lookup', { found: !!user, userId: user?.id });
-    if (!user) {
-      user = await repo.createUserWithSteam({ steamId });
-      log('user_created', { userId: user.id });
+    let user: any = null;
+
+    if (mode === 'login') {
+      // Find or create user by steamId
+      user = await repo.findUserBySteamId(steamId);
+      log('user_lookup', { found: !!user, userId: user?.id });
+      if (!user) {
+        user = await repo.createUserWithSteam({ steamId });
+        log('user_created', { userId: user.id });
+      }
+    } else {
+      // mode === 'link'
+      if (!linkUserId) {
+        log('link_missing_user_id');
+        return res.status(400).send('Invalid state');
+      }
+
+      const current = await repo.findUserById(linkUserId);
+      if (!current) {
+        log('link_user_not_found', { linkUserId });
+        return res.status(400).send('Invalid state');
+      }
+
+      // Ensure steamId not linked to another user
+      try {
+        await repo.linkSteamToUser(current.id, steamId);
+      } catch (e: any) {
+        const msg = e?.message ? String(e.message) : '';
+        log('link_failed', { message: msg });
+        // Keep it explicit; do not merge.
+        return res.status(409).send('Steam account already linked');
+      }
+
+      user = await repo.findUserById(current.id);
+      log('link_success', { userId: user?.id, steamId });
     }
 
     // Resolve Steam nickname (best-effort).
@@ -175,14 +229,16 @@ export const steamAuthCallback: RequestHandler = async (req, res, next) => {
     await repo.createSession({ userId: user.id, tokenHash, expiresAt, ip: req.ip, userAgent: req.headers['user-agent'] });
     log('session_created', { userId: user.id, expiresAt: expiresAt.toISOString() });
 
-    // Set cookie
+    // Set cookie (align with email/password auth cookie policy)
     const isProd = process.env.NODE_ENV === 'production';
     const { cookieName } = getAuthConfig();
+    const sameSite = isProd ? 'None' : 'Lax';
+
     const parts = [
       `${cookieName}=${encodeURIComponent(token)}`,
       'Path=/',
       'HttpOnly',
-      'SameSite=Lax',
+      `SameSite=${sameSite}`,
       `Expires=${expiresAt.toUTCString()}`,
     ];
     if (isProd) parts.push('Secure');
