@@ -1,5 +1,6 @@
 import { prisma } from '../db/prisma';
 import { aoe2InsightsSearchByNickname, normalizeNickname } from './aoe2insightsService';
+import { MapService } from './mapService';
 
 export type AutoLinkResult =
   | { ok: true; linked: true; aoeProfileId: string }
@@ -74,15 +75,58 @@ export async function tryAutoLinkSteamToAoe(params: {
       return { ok: true, linked: false, reason: 'nickname_not_exact_match' };
     }
 
-    // Internal roster existence check (strict requirement).
-    const aoePlayer = await prisma.aoePlayer.findUnique({
+    // Internal roster existence check.
+    // If missing, try to auto-create from the current map payload (maps/default).
+    let aoePlayer = await prisma.aoePlayer.findUnique({
       where: { aoeProfileId: parsed.profileId },
-      select: { aoeProfileId: true, claimedByUserId: true },
+      select: { aoeProfileId: true, claimedByUserId: true, nickname: true, aoeProfileUrl: true },
     });
 
     if (!aoePlayer) {
-      log('skip', { reason: 'aoe_profile_not_in_internal_db', aoeProfileId: parsed.profileId });
-      return { ok: true, linked: false, reason: 'aoe_profile_not_in_internal_db' };
+      try {
+        log('aoe_player_missing_try_map_payload', { aoeProfileId: parsed.profileId });
+
+        const map = new MapService();
+        const payload = await map.getMapPayload('default');
+        const players = payload?.players ?? {};
+
+        // In map payload players are keyed by playerKey and include extraJson via spread.
+        // We expect insightsUserId to be present in extraJson for claim candidates.
+        const match = Object.values(players).find((p: any) => String(p?.insightsUserId ?? '').trim() === String(parsed.profileId).trim());
+
+        const nicknameFromMap = String((match as any)?.name ?? '').trim();
+        const aoeProfileUrl = `https://www.aoe2insights.com/user/${encodeURIComponent(parsed.profileId)}/`;
+
+        if (!match || !nicknameFromMap) {
+          log('skip', { reason: 'aoe_player_missing_and_not_in_map_payload', aoeProfileId: parsed.profileId });
+          return { ok: true, linked: false, reason: 'aoe_profile_not_in_internal_db' };
+        }
+
+        const created = await prisma.aoePlayer.create({
+          data: {
+            aoeProfileId: parsed.profileId,
+            aoeProfileUrl,
+            nickname: nicknameFromMap,
+          },
+          select: { aoeProfileId: true, claimedByUserId: true, nickname: true, aoeProfileUrl: true },
+        });
+
+        aoePlayer = created;
+        log('aoe_player_created_from_map_payload', { aoeProfileId: parsed.profileId, nickname: nicknameFromMap });
+      } catch (e: any) {
+        // Could be unique violation (race) or map lookup failed.
+        log('aoe_player_autocreate_failed', { reason: 'aoe_player_autocreate_failed', message: e?.message ? String(e.message) : undefined });
+
+        // Re-read in case it was created concurrently.
+        aoePlayer = await prisma.aoePlayer.findUnique({
+          where: { aoeProfileId: parsed.profileId },
+          select: { aoeProfileId: true, claimedByUserId: true, nickname: true, aoeProfileUrl: true },
+        });
+
+        if (!aoePlayer) {
+          return { ok: true, linked: false, reason: 'aoe_profile_not_in_internal_db' };
+        }
+      }
     }
 
     // Ensure target AoE profile is not claimed by another user.
@@ -116,6 +160,8 @@ export async function tryAutoLinkSteamToAoe(params: {
 
     // Atomic claim (same pattern as manual claim: only claim if currently unclaimed).
     // If already claimed by this same user (race / retry), treat it as OK.
+    log('claim_attempt', { aoeProfileId: parsed.profileId, alreadyClaimedBy: aoePlayer.claimedByUserId ?? null });
+
     if (!aoePlayer.claimedByUserId) {
       const updated = await prisma.aoePlayer.updateMany({
         where: {
@@ -128,15 +174,19 @@ export async function tryAutoLinkSteamToAoe(params: {
         },
       });
 
+      log('claim_result', { aoeProfileId: parsed.profileId, updatedCount: updated.count });
+
       if (updated.count !== 1) {
         // Someone else claimed in-between.
         log('skip', { reason: 'aoe_profile_already_claimed_race', aoeProfileId: parsed.profileId, updatedCount: updated.count });
         return { ok: true, linked: false, reason: 'aoe_profile_already_claimed' };
       }
+    } else {
+      log('claim_skipped_already_claimed', { aoeProfileId: parsed.profileId, claimedByUserId: aoePlayer.claimedByUserId });
     }
 
     // Update legacy User fields (compat).
-    await prisma.user.update({
+    const legacyUpdate = await prisma.user.update({
       where: { id: userId },
       data: {
         aoeProfileId: parsed.profileId,
@@ -144,7 +194,10 @@ export async function tryAutoLinkSteamToAoe(params: {
         aoeNickname: parsed.exactName,
         aoeLinkedAt: new Date(),
       },
+      select: { id: true, aoeProfileId: true, aoeNickname: true, aoeLinkedAt: true },
     });
+
+    log('legacy_user_updated', legacyUpdate as any);
 
     log('linked', { aoeProfileId: parsed.profileId });
     return { ok: true, linked: true, aoeProfileId: parsed.profileId };
