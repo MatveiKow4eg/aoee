@@ -48,8 +48,7 @@ export const steamAuthStart: RequestHandler = async (req, res, next) => {
 
     // Return URL must match what's configured in Steam (prod), but in dev we want localhost.
     // Prefer deriving it from config/request to avoid hard-coding production.
-    const { apiBaseUrl } = getAuthConfig();
-    const derivedBase = apiBaseUrl || `${req.protocol}://${req.get('host')}`;
+    const derivedBase = `${req.protocol}://${req.get('host')}`;
     const returnTo = `${derivedBase}/api/auth/steam/callback`;
 
     const nonce = randomUUID();
