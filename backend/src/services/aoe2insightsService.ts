@@ -1,9 +1,10 @@
 import * as cheerio from 'cheerio';
 
-export type Aoe2InsightsProfile = {
-  id: string;
-  nickname: string;
-  url: string;
+export type ParsedAoeSearchResult = {
+  resultsCount: number;
+  exactName: string | null;
+  profileId: string | null;
+  profileUrl: string | null;
 };
 
 async function fetchWithTimeout(url: string, init: RequestInit, timeoutMs: number): Promise<Response> {
@@ -16,13 +17,58 @@ async function fetchWithTimeout(url: string, init: RequestInit, timeoutMs: numbe
   }
 }
 
-function extractUserIdFromHref(href: string): string | null {
-  // expected: /user/<id>/
-  const m = href.match(/^\/user\/(\d+)\/?/);
-  return m ? m[1] : null;
+export function normalizeNickname(value: string): string {
+  return (value ?? '')
+    .trim()
+    .replace(/\s+/g, ' ')
+    .toLowerCase();
 }
 
-export async function findExactProfileByNickname(nicknameRaw: string): Promise<Aoe2InsightsProfile | null> {
+export function parseAoe2InsightsSearch(html: string): ParsedAoeSearchResult {
+  const $ = cheerio.load(html);
+
+  const headerText = $('.search-results-header').first().text().trim();
+  let resultsCount = 0;
+
+  const matchCount = headerText.match(/(\d+)\s+result/i);
+  if (matchCount) {
+    resultsCount = Number(matchCount[1]);
+  }
+
+  const firstTile = $('.user-tile').first();
+
+  if (!firstTile.length) {
+    return {
+      resultsCount,
+      exactName: null,
+      profileId: null,
+      profileUrl: null,
+    };
+  }
+
+  const exactName = firstTile.find('.user-tile-name').first().text().trim() || null;
+  const href = firstTile.find('a.stretched-link').attr('href') || null;
+
+  let profileId: string | null = null;
+  let profileUrl: string | null = null;
+
+  if (href) {
+    const idMatch = href.match(/\/user\/(\d+)\/?/);
+    if (idMatch) {
+      profileId = idMatch[1];
+      profileUrl = `https://www.aoe2insights.com/user/${profileId}/`;
+    }
+  }
+
+  return {
+    resultsCount,
+    exactName,
+    profileId,
+    profileUrl,
+  };
+}
+
+export async function aoe2InsightsSearchByNickname(nicknameRaw: string): Promise<ParsedAoeSearchResult | null> {
   const nickname = (nicknameRaw ?? '').trim();
   if (!nickname) return null;
 
@@ -46,30 +92,8 @@ export async function findExactProfileByNickname(nicknameRaw: string): Promise<A
     if (!res.ok) return null;
 
     const html = await res.text();
-    const $ = cheerio.load(html);
-
-    // The page shows a header with results count.
-    // We implement strict logic: collect user tiles and require exactly 1.
-    const tiles = $('.user-tile');
-    if (tiles.length !== 1) return null;
-
-    const tile = tiles.first();
-
-    const name = tile.find('.user-tile-name').first().text().trim();
-    if (!name) return null;
-    if (name !== nickname) return null;
-
-    const href = tile.find('a.stretched-link').first().attr('href');
-    if (!href) return null;
-
-    const id = extractUserIdFromHref(href);
-    if (!id) return null;
-
-    const absUrl = href.startsWith('http') ? href : `https://www.aoe2insights.com${href}`;
-
-    return { id, nickname: name, url: absUrl };
+    return parseAoe2InsightsSearch(html);
   } catch {
-    // Best-effort: treat any error as "not linked".
     return null;
   }
 }

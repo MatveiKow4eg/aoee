@@ -5,6 +5,17 @@ export class AuthRepository {
     return prisma.user.findUnique({ where: { email } });
   }
 
+  async findUserById(userId: string) {
+    return prisma.user.findUnique({ where: { id: userId } });
+  }
+
+  async updateUserDisplayName(userId: string, displayName: string) {
+    return prisma.user.update({
+      where: { id: userId },
+      data: { displayName },
+    });
+  }
+
   async updateUserAoe2InsightsLink(userId: string, args: { aoeProfileId: string; aoeProfileUrl: string; aoeNickname: string; aoeLinkedAt?: Date }) {
     return prisma.user.update({
       where: { id: userId },

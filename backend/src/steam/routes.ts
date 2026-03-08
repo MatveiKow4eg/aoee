@@ -6,7 +6,7 @@ import { getAuthConfig } from '../config/auth';
 import { randomUUID } from 'crypto';
 import { randomToken, sha256Base64Url } from '../utils/crypto';
 import { getSteamPersonaName } from '../services/steamService';
-import { findExactProfileByNickname } from '../services/aoe2insightsService';
+import { tryAutoLinkSteamToAoe } from '../services/steamAutoLinkService';
 
 const OPENID_NS = 'http://specs.openid.net/auth/2.0';
 const OPENID_IDENTITY = 'http://specs.openid.net/auth/2.0/identifier_select';
@@ -94,23 +94,31 @@ export const steamAuthCallback: RequestHandler = async (req, res, next) => {
       user = await repo.createUserWithSteam({ steamId });
     }
 
-    // Best-effort: try auto-linking AoE2Insights profile by exact nickname match.
+    // Resolve Steam nickname (best-effort).
+    const steamNickname = await getSteamPersonaName(steamId);
+
+    // Store some human-readable name on user (best-effort; never fail login).
+    // We don't store steamId on User directly (it lives in Account).
+    try {
+      if (steamNickname && !user.displayName) {
+        user = await repo.updateUserDisplayName(user.id, steamNickname);
+      }
+    } catch {
+      // ignore
+    }
+
+    // Best-effort: strict auto-linking by Steam nickname -> AoE2 Insights -> internal DB.
     // This must never break Steam login.
     try {
       const needsLink = !user.aoeProfileId;
-      if (needsLink) {
-        const personaName = await getSteamPersonaName(steamId);
-        if (personaName) {
-          const profile = await findExactProfileByNickname(personaName);
-          if (profile) {
-            const updated = await repo.updateUserAoe2InsightsLink(user.id, {
-              aoeProfileId: profile.id,
-              aoeProfileUrl: profile.url,
-              aoeNickname: profile.nickname,
-              aoeLinkedAt: new Date(),
-            });
-            user = updated;
-          }
+      if (needsLink && steamNickname) {
+        const result = await tryAutoLinkSteamToAoe({
+          userId: user.id,
+          steamId,
+          steamNickname,
+        });
+        if (result.ok && result.linked) {
+          user = (await repo.findUserById(user.id)) ?? user;
         }
       }
     } catch {
