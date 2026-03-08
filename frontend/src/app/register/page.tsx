@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useMemo, useState } from "react";
-import { register, steamLoginUrl } from "../../lib/api/auth";
+import { login, register, steamLoginUrl } from "../../lib/api/auth";
 
 function RegisterInner() {
   const router = useRouter();
@@ -65,7 +65,10 @@ function RegisterInner() {
               setIsSubmitting(true);
               try {
                 await register(e1, password);
-                setDone(true);
+                // Auto-login after successful registration
+                await login(e1, password);
+                router.replace(nextUrl);
+                return;
               } catch (err: any) {
                 setError(err?.message ? String(err.message) : "Register failed");
               } finally {

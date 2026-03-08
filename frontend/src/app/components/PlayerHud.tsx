@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useMemo, useState, useEffect } from "react";
+import { createPortal } from "react-dom";
 
 export type PlayerHudProps = {
   nickname?: string | null;
@@ -10,6 +11,12 @@ export type PlayerHudProps = {
   buildingUrl?: string | null;
   online?: boolean;
   userId?: string | number;
+
+  steamConnected?: boolean;
+  steamLinkUrl?: string;
+  onLogout?: () => void;
+
+  linkedPlayerName?: string | null;
 };
 
 function mapTierToBuildingUrl(raw?: string | null): string | null {
@@ -46,10 +53,15 @@ function mapTierToBuildingUrl(raw?: string | null): string | null {
   return map[key] ?? null;
 }
 
-export default function PlayerHud({ nickname, title, tierLabel, avatarUrl, buildingUrl, online, userId }: PlayerHudProps) {
+export default function PlayerHud({ nickname, title, tierLabel, avatarUrl, buildingUrl, online, userId, steamConnected, steamLinkUrl, onLogout, linkedPlayerName }: PlayerHudProps) {
   const [collapsed, setCollapsed] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [statsOpen, setStatsOpen] = useState(false);
+  const [statsLoading, setStatsLoading] = useState(false);
+  const [statsError, setStatsError] = useState<string | null>(null);
+  const [statsData, setStatsData] = useState<any | null>(null);
 
-  const name = (nickname ?? "").trim() || "Игрок";
+  const name = (nickname ?? "").trim() || "Player";
   const subtitle = (title ?? "").trim();
   const autoBuildingUrl = useMemo(() => {
     // Priority: explicit tierLabel prop from parent
@@ -130,6 +142,17 @@ export default function PlayerHud({ nickname, title, tierLabel, avatarUrl, build
   }, [collapsed]);
 
   const toggle = () => setCollapsed((v) => !v);
+
+  useEffect(() => {
+    if (!settingsOpen && !statsOpen) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      setSettingsOpen(false);
+      setStatsOpen(false);
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [settingsOpen, statsOpen]);
 
   return (
     <div
@@ -336,7 +359,7 @@ export default function PlayerHud({ nickname, title, tierLabel, avatarUrl, build
                     textShadow: "0 1px 0 rgba(0,0,0,0.55)",
                   }}
                 >
-                  рейтинг = {rating}
+                  rating = {rating}
                 </div>
               )}
             </div>
@@ -355,10 +378,241 @@ export default function PlayerHud({ nickname, title, tierLabel, avatarUrl, build
               zIndex: 4,
             }}
           >
+            {statsOpen &&
+              typeof document !== "undefined" &&
+              createPortal(
+                <>
+                  <div
+                    onPointerDown={(e) => {
+                      e.stopPropagation();
+                      setStatsOpen(false);
+                    }}
+                    style={{
+                      position: "fixed",
+                      inset: 0,
+                      zIndex: 999996,
+                      pointerEvents: "auto",
+                      background: "rgba(0,0,0,0.35)",
+                    }}
+                  />
+                  <div
+                    onPointerDown={(e) => e.stopPropagation()}
+                    style={{
+                      position: "fixed",
+                      left: "50%",
+                      top: "50%",
+                      transform: "translate(-50%, -50%)",
+                      width: "min(720px, calc(100vw - 32px))",
+                      maxHeight: "min(80vh, calc(100vh - 32px))",
+                      overflow: "auto",
+                      padding: 14,
+                      borderRadius: 12,
+                      border: "1px solid rgba(202,162,77,0.65)",
+                      background: "rgba(20, 14, 10, 0.97)",
+                      boxShadow: "0 18px 44px rgba(0,0,0,0.70)",
+                      color: "#f7f0df",
+                      zIndex: 999997,
+                      pointerEvents: "auto",
+                    }}
+                  >
+                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, marginBottom: 10 }}>
+                      <div style={{ fontWeight: 900, fontSize: 12, letterSpacing: 0.6, textTransform: "uppercase", opacity: 0.92 }}>Statistics</div>
+                      <button
+                        type="button"
+                        onClick={() => setStatsOpen(false)}
+                        style={{ background: "transparent", border: 0, color: "rgba(247,240,223,0.9)", cursor: "pointer", fontSize: 16, lineHeight: 1 }}
+                        aria-label="Close"
+                        title="Close"
+                      >
+                        ×
+                      </button>
+                    </div>
+
+                    {statsLoading && <div style={{ opacity: 0.9 }}>Loading...</div>}
+                    {!statsLoading && statsError && <div style={{ color: "#ffb4b4" }}>{statsError}</div>}
+
+                    {!statsLoading && !statsError && statsData && (
+                      <>
+                        <div style={{ border: "1px solid rgba(255,255,255,0.14)", borderRadius: 12, padding: 12, marginBottom: 10 }}>
+                          <div style={{ opacity: 0.75, fontSize: 12, fontWeight: 800 }}>Matches played</div>
+                          <div style={{ fontWeight: 900, fontSize: 22, marginTop: 4 }}>
+                            {statsData?.matchesPlayed?.total ?? "—"}
+                          </div>
+                          {statsData?.matchesPlayed?.mostOnText ? (
+                            <div style={{ opacity: 0.85, fontSize: 12, marginTop: 8, lineHeight: 1.3 }}>
+                              {statsData.matchesPlayed.mostOnText}
+                            </div>
+                          ) : null}
+                        </div>
+
+                        <div style={{ fontSize: 11, opacity: 0.75, marginBottom: 12 }}>
+                          Last updated: {statsData?.rawUpdatedAt ? new Date(statsData.rawUpdatedAt).toLocaleString() : "—"}
+                        </div>
+
+                        <div
+                          style={{
+                            display: "grid",
+                            gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
+                            gap: 12,
+                          }}
+                        >
+                          {([
+                            ["overallBestCiv", "Best civ"],
+                            ["overallBestMap", "Best map"],
+                            ["overallBestPosition", "Best position"],
+                          ] as const).map(([key, label]) => {
+                            const v = statsData?.[key];
+                            if (!v) return null;
+                            return (
+                              <div
+                                key={key}
+                                style={{
+                                  border: "1px solid rgba(255,255,255,0.14)",
+                                  borderRadius: 12,
+                                  padding: 12,
+                                  background: "rgba(255,255,255,0.03)",
+                                  minHeight: 92,
+                                }}
+                              >
+                                <div style={{ opacity: 0.75, fontSize: 12, fontWeight: 800 }}>{label}</div>
+                                <div style={{ display: "flex", gap: 10, marginTop: 8, alignItems: "center" }}>
+                                  {v.imageUrl ? (
+                                    // eslint-disable-next-line @next/next/no-img-element
+                                    <img src={v.imageUrl} alt={v.name || label} style={{ width: 44, height: 44, objectFit: "contain", flex: "0 0 auto" }} />
+                                  ) : (
+                                    <div style={{ width: 44, height: 44, borderRadius: 10, background: "rgba(255,255,255,0.08)" }} />
+                                  )}
+                                  <div style={{ minWidth: 0 }}>
+                                    <div style={{ fontWeight: 900, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={v.name}>
+                                      {v.name || "—"}
+                                    </div>
+                                    {v.winRateText ? <div style={{ opacity: 0.9, fontSize: 12, marginTop: 2 }}>{v.winRateText}</div> : null}
+                                    {v.matchesText ? <div style={{ opacity: 0.8, fontSize: 12 }}>{v.matchesText}</div> : null}
+                                  </div>
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </>
+                    )}
+                  </div>
+                </>,
+                document.body
+              )}
+
+            {settingsOpen &&
+              typeof document !== "undefined" &&
+              createPortal(
+                <>
+                  <div
+                    onPointerDown={(e) => {
+                      e.stopPropagation();
+                      setSettingsOpen(false);
+                    }}
+                    style={{
+                      position: "fixed",
+                      inset: 0,
+                      zIndex: 999998,
+                      pointerEvents: "auto",
+                      background: "transparent",
+                    }}
+                  />
+                  <div
+                    onPointerDown={(e) => e.stopPropagation()}
+                    style={{
+                      position: "fixed",
+                      left: "50%",
+                      top: "50%",
+                      transform: "translate(-50%, -50%)",
+                      width: 260,
+                      padding: 12,
+                      borderRadius: 12,
+                      border: "1px solid rgba(202,162,77,0.65)",
+                      background: "rgba(20, 14, 10, 0.96)",
+                      boxShadow: "0 18px 44px rgba(0,0,0,0.70)",
+                      color: "#f7f0df",
+                      zIndex: 999999,
+                      pointerEvents: "auto",
+                    }}
+                  >
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, marginBottom: 10 }}>
+                  <div style={{ fontWeight: 900, fontSize: 12, letterSpacing: 0.6, textTransform: "uppercase", opacity: 0.92 }}>Settings</div>
+                  <button
+                    type="button"
+                    onClick={() => setSettingsOpen(false)}
+                    style={{ background: "transparent", border: 0, color: "rgba(247,240,223,0.9)", cursor: "pointer", fontSize: 16, lineHeight: 1 }}
+                    aria-label="Close"
+                    title="Close"
+                  >
+                    ×
+                  </button>
+                </div>
+
+                <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                  <div style={{ fontSize: 12, opacity: 0.92 }}>
+                    Linked player: <span style={{ fontWeight: 900 }}>{(linkedPlayerName ?? name) || "—"}</span>
+                  </div>
+
+                  <div style={{ fontSize: 12, opacity: 0.92 }}>
+                    Status: <span style={{ fontWeight: 900 }}>steam - {steamConnected ? "connected" : "not connected"}</span>
+                  </div>
+
+                  {!steamConnected && steamLinkUrl && (
+                    <a
+                      href={steamLinkUrl}
+                      style={{
+                        display: "inline-block",
+                        width: "fit-content",
+                        padding: "6px 10px",
+                        borderRadius: 10,
+                        border: "1px solid rgba(202,162,77,0.9)",
+                        background: "rgba(202,162,77,0.18)",
+                        color: "#f7f0df",
+                        fontWeight: 900,
+                        textDecoration: "none",
+                      }}
+                      title="Connect Steam"
+                    >
+                      Connect Steam
+                    </a>
+                  )}
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSettingsOpen(false);
+                      onLogout?.();
+                    }}
+                    style={{
+                      width: "100%",
+                      padding: "8px 10px",
+                      borderRadius: 10,
+                      border: "1px solid rgba(255,255,255,0.22)",
+                      background: "rgba(255,255,255,0.06)",
+                      color: "#f7f0df",
+                      fontWeight: 900,
+                      cursor: "pointer",
+                      textAlign: "center",
+                    }}
+                    title="Log out"
+                  >
+                    Log out
+                  </button>
+                </div>
+              </div>
+                </>,
+                document.body
+              )}
+
             <button
               type="button"
-              aria-label="настройки"
-              title="настройки"
+              aria-label="Settings"
+              title="Settings"
+              onClick={(e) => {
+                e.stopPropagation();
+                setSettingsOpen((v) => !v);
+              }}
               style={{
                 cursor: "pointer",
                 background: "transparent",
@@ -387,8 +641,34 @@ export default function PlayerHud({ nickname, title, tierLabel, avatarUrl, build
             </button>
             <button
               type="button"
-              aria-label="Статистика"
-              title="Статистика"
+              aria-label="Statistics"
+              title="Statistics"
+              onClick={async (e) => {
+                e.stopPropagation();
+                if (!userId) {
+                  setStatsError("Missing userId");
+                  setStatsData(null);
+                  setStatsOpen(true);
+                  return;
+                }
+
+                setStatsOpen(true);
+                setStatsError(null);
+                setStatsLoading(true);
+
+                try {
+                  const u = encodeURIComponent(String(userId));
+                  const res = await fetch(`/api/aoe2insights/statistics?userId=${u}`, { cache: "no-store" });
+                  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                  const j = await res.json();
+                  setStatsData(j);
+                } catch (err: any) {
+                  setStatsError(err?.message ? String(err.message) : "Failed to load statistics");
+                  setStatsData(null);
+                } finally {
+                  setStatsLoading(false);
+                }
+              }}
               style={{
                 cursor: "pointer",
                 background: "transparent",
@@ -415,8 +695,8 @@ export default function PlayerHud({ nickname, title, tierLabel, avatarUrl, build
         <button
           type="button"
           onClick={toggle}
-          aria-label={collapsed ? "Показать HUD" : "Скрыть HUD"}
-          title={collapsed ? "Показать" : "Скрыть"}
+          aria-label={collapsed ? "Show HUD" : "Hide HUD"}
+          title={collapsed ? "Show" : "Hide"}
           style={{
             width: HANDLE_W,
             minWidth: HANDLE_W,
