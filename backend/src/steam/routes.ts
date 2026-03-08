@@ -54,11 +54,31 @@ export const steamAuthStart: RequestHandler = async (req, res, next) => {
 };
 
 export const steamAuthCallback: RequestHandler = async (req, res, next) => {
+  // Lightweight structured logs to debug production Steam auto-link.
+  const rid = (req as any).id || randomUUID();
+  const log = (event: string, extra?: Record<string, unknown>) => {
+    try {
+      // eslint-disable-next-line no-console
+      console.log(`[steam-callback] ${event}`, {
+        rid,
+        method: req.method,
+        path: req.originalUrl,
+        ip: req.ip,
+        ...(extra ?? {}),
+      });
+    } catch {
+      // ignore
+    }
+  };
+
   try {
+    log('started');
+
     // Validate state (nonce)
     const state = String(req.query.state || '');
     const ts = nonces.get(state);
     if (!ts || Date.now() - ts > 5 * 60 * 1000) {
+      log('invalid_state', { state, hasTs: !!ts });
       return res.status(400).send('Invalid state');
     }
     nonces.delete(state);
@@ -80,30 +100,38 @@ export const steamAuthCallback: RequestHandler = async (req, res, next) => {
       body: params.toString(),
     });
     const text = await verifyRes.text();
-    if (!/is_valid\s*:\s*true/i.test(text)) {
+    const isValid = /is_valid\s*:\s*true/i.test(text);
+    log('openid_verified', { status: verifyRes.status, isValid });
+    if (!isValid) {
       return res.status(400).send('OpenID validation failed');
     }
 
     const claimedId = typeof req.query['openid.claimed_id'] === 'string' ? (req.query['openid.claimed_id'] as string) : null;
     const steamId = extractSteamId(claimedId);
+    log('steam_id_extracted', { claimedId, steamId });
     if (!steamId) return res.status(400).send('Missing steamId');
 
     // Find or create user by steamId
     let user = await repo.findUserBySteamId(steamId);
+    log('user_lookup', { found: !!user, userId: user?.id });
     if (!user) {
       user = await repo.createUserWithSteam({ steamId });
+      log('user_created', { userId: user.id });
     }
 
     // Resolve Steam nickname (best-effort).
     const steamNickname = await getSteamPersonaName(steamId);
+    log('steam_nickname', { steamNickname });
 
     // Store some human-readable name on user (best-effort; never fail login).
     // We don't store steamId on User directly (it lives in Account).
     try {
       if (steamNickname && !user.displayName) {
         user = await repo.updateUserDisplayName(user.id, steamNickname);
+        log('user_display_name_updated', { displayName: user.displayName });
       }
-    } catch {
+    } catch (e: any) {
+      log('user_display_name_update_failed', { message: e?.message ? String(e.message) : undefined });
       // ignore
     }
 
@@ -111,17 +139,30 @@ export const steamAuthCallback: RequestHandler = async (req, res, next) => {
     // This must never break Steam login.
     try {
       const needsLink = !user.aoeProfileId;
+      log('auto_link_check', { needsLink, hasSteamNickname: !!steamNickname, existingAoeProfileId: user.aoeProfileId ?? null });
+
       if (needsLink && steamNickname) {
+        log('auto_link_invoking');
         const result = await tryAutoLinkSteamToAoe({
           userId: user.id,
           steamId,
           steamNickname,
         });
+        log('auto_link_result', result as any);
+
         if (result.ok && result.linked) {
           user = (await repo.findUserById(user.id)) ?? user;
+          log('user_reloaded_after_link', {
+            aoeProfileId: user.aoeProfileId ?? null,
+            aoeNickname: user.aoeNickname ?? null,
+            aoeLinkedAt: user.aoeLinkedAt ?? null,
+          });
         }
+      } else {
+        log('auto_link_skipped_preconditions', { needsLink, steamNickname: steamNickname ?? null });
       }
-    } catch {
+    } catch (e: any) {
+      log('auto_link_failed_unexpected', { message: e?.message ? String(e.message) : undefined });
       // ignore
     }
 
@@ -132,6 +173,7 @@ export const steamAuthCallback: RequestHandler = async (req, res, next) => {
     const expiresAt = new Date(Date.now() + sessionTtlDays * 24 * 60 * 60 * 1000);
 
     await repo.createSession({ userId: user.id, tokenHash, expiresAt, ip: req.ip, userAgent: req.headers['user-agent'] });
+    log('session_created', { userId: user.id, expiresAt: expiresAt.toISOString() });
 
     // Set cookie
     const isProd = process.env.NODE_ENV === 'production';
@@ -146,8 +188,11 @@ export const steamAuthCallback: RequestHandler = async (req, res, next) => {
     if (isProd) parts.push('Secure');
     res.setHeader('Set-Cookie', parts.join('; '));
 
-    res.redirect(302, frontendRedirectUrl());
-  } catch (err) {
+    const redirectTo = frontendRedirectUrl();
+    log('redirect', { to: redirectTo });
+    res.redirect(302, redirectTo);
+  } catch (err: any) {
+    log('error', { message: err?.message ? String(err.message) : undefined });
     next(err);
   }
 };
