@@ -16,6 +16,15 @@ export type MeResponse = {
     role?: string | null;
     steamConnected?: boolean;
     providers?: string[];
+    avatarUrl?: string | null;
+
+    aoePlayer?: {
+      id: string;
+      aoeProfileId: string;
+      aoeProfileUrl: string;
+      nickname: string;
+      claimedAt?: string | null;
+    } | null;
   } | null;
 };
 

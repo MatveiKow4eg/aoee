@@ -1,11 +1,13 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import PlayerHud from "./components/PlayerHud";
 import { useRouter } from "next/navigation";
 import * as PIXI from "pixi.js";
 import { Viewport } from "pixi-viewport";
 import { loadMapState } from "../store/mapStateStore";
 import { me, steamLinkUrl } from "../lib/api/auth";
+import type { MeResponse } from "../lib/api/auth";
 
 // ========== Types ==========
 
@@ -205,6 +207,7 @@ export default function Home() {
   const [authChecked, setAuthChecked] = useState(false);
   const [isAuthed, setIsAuthed] = useState(false);
   const [steamConnected, setSteamConnected] = useState<boolean>(false);
+  const [meUser, setMeUser] = useState<MeResponse["user"] | null>(null);
   const nextUrl = useMemo(() => "/", []);
   const [isDetailsOpen, setIsDetailsOpen] = useState(false);
   const [isStatsOpen, setIsStatsOpen] = useState(false);
@@ -269,6 +272,7 @@ export default function Home() {
         if (cancelled) return;
         const ok = !!r?.user;
         setIsAuthed(ok);
+        setMeUser(r?.user ?? null);
         const providers = ((r as any)?.user?.providers ?? []) as string[];
         setSteamConnected(providers.includes("steam") || !!(r as any)?.user?.steamConnected);
         setAuthChecked(true);
@@ -688,6 +692,61 @@ export default function Home() {
 
   return (
     <div style={{ height: "100dvh", display: "flex", flexDirection: "column", overflow: "hidden" }}>
+      {/* MOBA-like HUD top-right */}
+      <PlayerHud
+        tierLabel={(() => {
+          const insights = (meUser as any)?.aoePlayer?.aoeProfileId ?? (meUser as any)?.aoePlayer?.insightsUserId;
+          const insightsStr = insights != null ? String(insights).trim() : "";
+          const players = (payloadRef.current as any)?.players as Record<string, any> | undefined;
+          if (insightsStr && players) {
+            const hit = Object.entries(players).find(([, p]) => String((p as any)?.insightsUserId ?? "").trim() === insightsStr);
+            const rec = hit?.[1] as any;
+            const rawTier = (rec?.tier ?? "").toString().trim();
+            const rawLabel = (((rec as any)?.tierLabel) ?? "").toString().trim();
+            const raw = rawTier || rawLabel;
+            return raw || undefined;
+          }
+          return undefined;
+        })()}
+        nickname={(() => {
+          // Prefer authoritative player card from the map payload (players[uXXX])
+          // matched by insightsUserId.
+          const insights = (meUser as any)?.aoePlayer?.aoeProfileId ?? (meUser as any)?.aoePlayer?.insightsUserId;
+          const insightsStr = insights != null ? String(insights).trim() : "";
+          const players = (payloadRef.current as any)?.players as Record<string, any> | undefined;
+          if (insightsStr && players) {
+            const hit = Object.entries(players).find(([, p]) => String((p as any)?.insightsUserId ?? "").trim() === insightsStr);
+            const rec = hit?.[1] as any;
+            if (rec?.name) return String(rec.name);
+          }
+          return (meUser as any)?.aoePlayer?.nickname ?? (meUser as any)?.displayName ?? (meUser as any)?.email ?? "Игрок";
+        })()}
+        title={(() => {
+          const insights = (meUser as any)?.aoePlayer?.aoeProfileId ?? (meUser as any)?.aoePlayer?.insightsUserId;
+          const insightsStr = insights != null ? String(insights).trim() : "";
+          const players = (payloadRef.current as any)?.players as Record<string, any> | undefined;
+          if (insightsStr && players) {
+            const hit = Object.entries(players).find(([, p]) => String((p as any)?.insightsUserId ?? "").trim() === insightsStr);
+            const rec = hit?.[1] as any;
+            if (rec?.title) return String(rec.title);
+          }
+          return (meUser as any)?.role ? String((meUser as any)?.role) : "";
+        })()}
+        avatarUrl={(() => {
+          // Correct mapping: insightsUserId -> internal playerId (uXXX) -> /people/uXXX.png
+          const insights = (meUser as any)?.aoePlayer?.aoeProfileId ?? (meUser as any)?.aoePlayer?.insightsUserId;
+          const insightsStr = insights != null ? String(insights).trim() : "";
+          const players = (payloadRef.current as any)?.players as Record<string, any> | undefined;
+          if (insightsStr && players) {
+            const hit = Object.entries(players).find(([, p]) => String((p as any)?.insightsUserId ?? "").trim() === insightsStr);
+            const playerId = hit?.[0];
+            if (playerId) return `/people/${encodeURIComponent(playerId)}.png`;
+          }
+          return "/people/u001.png";
+        })()}
+        online={true}
+      />
+
       <div
         style={{
           position: "fixed",
@@ -707,12 +766,12 @@ export default function Home() {
         authChecked={String(authChecked)} isAuthed={String(isAuthed)} steamConnected={String(steamConnected)} isLoading={String(isLoading)} isLoaded={String(isLoaded)} hasEntered={String(hasEntered)} hostReady={String(hostReady)} stage={debugStage}{debugError ? ` error=${debugError}` : ""}
       </div>
 
-      {/* Steam connection status / link button */}
+      {/* Steam connection status / link button (moved lower to avoid HUD overlap) */}
       <div
         style={{
           position: "fixed",
           right: 12,
-          top: 12,
+          top: 86,
           zIndex: 99998,
           display: "flex",
           alignItems: "center",

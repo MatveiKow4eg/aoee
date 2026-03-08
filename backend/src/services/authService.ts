@@ -13,6 +13,9 @@ export type PublicUser = {
   steamConnected?: boolean;
   providers?: string[];
 
+  // Optional: UI avatar (e.g. Steam avatar when linked)
+  avatarUrl?: string | null;
+
   // Legacy AoE2Insights fields (compat)
   aoeProfileId?: string | null;
   aoeProfileUrl?: string | null;
@@ -21,6 +24,7 @@ export type PublicUser = {
 
   // New roster claim model
   aoePlayer?: {
+    id: string;
     aoeProfileId: string;
     aoeProfileUrl: string;
     nickname: string;
@@ -104,7 +108,15 @@ export class AuthService {
     const providers = await this.repo.listAccountProviders(session.user.id);
     const steamConnected = providers.includes('steam');
 
-    return { user: this.toPublicUser(session.user, claimed, { steamConnected, providers }) };
+    const steamAvatarUrl = await this.repo.getSteamAvatarUrlByUserId(session.user.id);
+
+    return {
+      user: this.toPublicUser(session.user, claimed, {
+        steamConnected,
+        providers,
+        avatarUrl: steamAvatarUrl,
+      }),
+    };
   }
 
   async logout(token: string | null) {
@@ -119,7 +131,11 @@ export class AuthService {
     }
   }
 
-  private toPublicUser(user: any, claimed?: any | null, extra?: { steamConnected?: boolean; providers?: string[] }): PublicUser {
+  private toPublicUser(
+    user: any,
+    claimed?: any | null,
+    extra?: { steamConnected?: boolean; providers?: string[]; avatarUrl?: string | null },
+  ): PublicUser {
     return {
       id: user.id,
       email: user.email,
@@ -129,6 +145,8 @@ export class AuthService {
       steamConnected: extra?.steamConnected ?? false,
       providers: extra?.providers ?? [],
 
+      avatarUrl: extra?.avatarUrl ?? null,
+
       aoeProfileId: user.aoeProfileId ?? null,
       aoeProfileUrl: user.aoeProfileUrl ?? null,
       aoeNickname: user.aoeNickname ?? null,
@@ -136,6 +154,7 @@ export class AuthService {
 
       aoePlayer: claimed
         ? {
+            id: claimed.id,
             aoeProfileId: claimed.aoeProfileId,
             aoeProfileUrl: claimed.aoeProfileUrl,
             nickname: claimed.nickname,

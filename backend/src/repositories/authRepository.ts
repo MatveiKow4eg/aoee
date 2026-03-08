@@ -78,6 +78,7 @@ export class AuthRepository {
     return prisma.aoePlayer.findUnique({
       where: { claimedByUserId: userId },
       select: {
+        id: true,
         aoeProfileId: true,
         aoeProfileUrl: true,
         nickname: true,
@@ -150,5 +151,19 @@ export class AuthRepository {
       throw new Error('CANNOT_REMOVE_LAST_LOGIN_METHOD');
     }
     return prisma.account.deleteMany({ where: { userId, provider: 'steam' } });
+  }
+
+  async getSteamAvatarUrlByUserId(userId: string): Promise<string | null> {
+    // We store the SteamId only inside Account. Use it to fetch avatar via Steam Web API.
+    const acc = await prisma.account.findFirst({
+      where: { userId, provider: 'steam' },
+      select: { providerAccountId: true },
+    });
+    const steamId = acc?.providerAccountId ?? null;
+    if (!steamId) return null;
+
+    const { getSteamPlayerSummary } = await import('../services/steamService');
+    const summary = await getSteamPlayerSummary(steamId);
+    return summary?.avatarMedium ?? summary?.avatarSmall ?? summary?.avatarFull ?? null;
   }
 }
