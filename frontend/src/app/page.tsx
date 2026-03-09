@@ -805,9 +805,7 @@ export default function Home() {
           backdropFilter: "blur(6px)",
         }}
       >
-        <div style={{ fontWeight: 900, fontSize: 12 }}>
-          Steam: {steamConnected ? "Connected" : "Not connected"}
-        </div>
+        {/* Steam connection badge removed (was: "Steam: Connected") */}
         {!steamConnected && (
           <a
             href={steamLinkUrl()}
