@@ -166,7 +166,7 @@ export class WorldsEdgeApiService {
     return identity;
   }
 
-  async getPersonalStatByAliases(aliases: string[]) {
+  async getPersonalStatByAliases(aliases: string[], opts?: { debug?: boolean }) {
     const list = Array.from(new Set(aliases.map((s) => String(s || '').trim()).filter(Boolean)));
     if (list.length === 0) return [] as WorldsEdgePersonalStatResponse[];
 
@@ -175,6 +175,8 @@ export class WorldsEdgeApiService {
     const url = new URL(`${this.baseUrl}/GetPersonalStat`);
     url.searchParams.set('title', 'age2');
     url.searchParams.set('aliases', JSON.stringify(list));
+
+    if (opts?.debug) console.log('[worlds-edge][debug] GetPersonalStat url (aliases):', url.toString());
 
     const res = await withTimeout(
       fetch(url.toString(), {
@@ -190,10 +192,12 @@ export class WorldsEdgeApiService {
       throw new HttpError(502, 'WORLDS_EDGE_UPSTREAM_ERROR', `World’s Edge API error: ${res.status} ${text}`);
     }
 
-    return res.json();
+    const json = await res.json();
+    if (opts?.debug) console.log('[worlds-edge][debug] GetPersonalStat raw (aliases):', JSON.stringify(json, null, 2));
+    return json;
   }
 
-  async getPersonalStatByProfileNames(profileNames: string[]) {
+  async getPersonalStatByProfileNames(profileNames: string[], opts?: { debug?: boolean }) {
     const list = Array.from(new Set(profileNames.map((s) => String(s || '').trim()).filter(Boolean)));
     if (list.length === 0) return [] as WorldsEdgePersonalStatResponse[];
 
@@ -201,6 +205,8 @@ export class WorldsEdgeApiService {
     url.searchParams.set('title', 'age2');
     // Worlds Edge expects JSON array string in query param, e.g. profile_names=["/steam/7656..."].
     url.searchParams.set('profile_names', JSON.stringify(list));
+
+    if (opts?.debug) console.log('[worlds-edge][debug] GetPersonalStat url (profile_names):', url.toString());
 
     const res = await withTimeout(
       fetch(url.toString(), {
@@ -216,7 +222,9 @@ export class WorldsEdgeApiService {
       throw new HttpError(502, 'WORLDS_EDGE_UPSTREAM_ERROR', `World’s Edge API error: ${res.status} ${text}`);
     }
 
-    return res.json();
+    const json = await res.json();
+    if (opts?.debug) console.log('[worlds-edge][debug] GetPersonalStat raw (profile_names):', JSON.stringify(json, null, 2));
+    return json;
   }
 
   /**
@@ -227,40 +235,36 @@ export class WorldsEdgeApiService {
    * - prefer 1v1 RM if we can detect it
    * - else pick the first stat block that has rating/rank fields
    */
-  normalizePrimaryStatSnapshot(raw: any): NormalizedStatSnapshot | null {
+  normalizePrimaryStatSnapshot(raw: any, opts?: { debug?: boolean; aoeProfileId?: string }): NormalizedStatSnapshot | null {
     if (!raw) return null;
 
-    // common shapes: { statGroups: [...] } or { stats: [...] } etc.
-    const groups: any[] = Array.isArray(raw?.statGroups)
-      ? raw.statGroups
-      : Array.isArray(raw?.stats)
-        ? raw.stats
-        : Array.isArray(raw)
-          ? raw
-          : [];
+    const debug = !!opts?.debug;
+    const aoeProfileId = opts?.aoeProfileId;
 
-    if (!groups.length) return null;
+    const num = (v: any): number | null => {
+      if (v == null) return null;
+      const n = typeof v === 'number' ? v : Number(v);
+      return Number.isFinite(n) ? Math.trunc(n) : null;
+    };
 
-    const extract = (g: any): NormalizedStatSnapshot => {
-      const leaderboardId = (g?.leaderboard_id ?? g?.leaderboardId ?? g?.leaderboard ?? null) as any;
+    const normalizeBlock = (b: any): NormalizedStatSnapshot => {
+      if (!b) return {};
 
-      const rating = g?.rating ?? g?.elo ?? g?.mmr ?? null;
-      const rank = g?.rank ?? null;
-      const rankTotal = g?.rank_total ?? g?.rankTotal ?? null;
+      // World’s Edge uses a couple different shapes; try both snake_case and camelCase.
+      const leaderboardIdRaw = b?.leaderboard_id ?? b?.leaderboardId ?? b?.leaderboard ?? b?.leaderboardID ?? null;
 
-      // wins/losses/streak could be nested
-      const wins = g?.wins ?? g?.win_count ?? g?.winCount ?? g?.record?.wins ?? null;
-      const losses = g?.losses ?? g?.loss_count ?? g?.lossCount ?? g?.record?.losses ?? null;
-      const streak = g?.streak ?? g?.current_streak ?? g?.currentStreak ?? null;
+      // rating may be absent in GetPersonalStat for some titles/modes.
+      const rating = b?.rating ?? b?.elo ?? b?.mmr ?? b?.rating_value ?? b?.ratingValue ?? null;
 
-      const num = (v: any): number | null => {
-        if (v == null) return null;
-        const n = typeof v === 'number' ? v : Number(v);
-        return Number.isFinite(n) ? Math.trunc(n) : null;
-      };
+      const rank = b?.rank ?? null;
+      const rankTotal = b?.ranktotal ?? b?.rank_total ?? b?.rankTotal ?? null;
+
+      const wins = b?.wins ?? b?.win_count ?? b?.winCount ?? b?.record?.wins ?? null;
+      const losses = b?.losses ?? b?.loss_count ?? b?.lossCount ?? b?.record?.losses ?? null;
+      const streak = b?.streak ?? b?.current_streak ?? b?.currentStreak ?? null;
 
       return {
-        leaderboardId: typeof leaderboardId === 'string' && leaderboardId.trim() ? leaderboardId.trim() : null,
+        leaderboardId: typeof leaderboardIdRaw === 'string' && leaderboardIdRaw.trim() ? leaderboardIdRaw.trim() : leaderboardIdRaw != null ? String(leaderboardIdRaw) : null,
         rating: num(rating),
         rank: num(rank),
         rankTotal: num(rankTotal),
@@ -270,21 +274,59 @@ export class WorldsEdgeApiService {
       };
     };
 
+    // Collect candidate blocks from known GetPersonalStat shapes.
+    const blocks: any[] = [];
+
+    const pushArr = (arr: any) => {
+      if (Array.isArray(arr)) blocks.push(...arr);
+    };
+
+    // Common observed fields in GetPersonalStat response: leaderboardStats / leaderboard_stats
+    pushArr(raw?.leaderboardStats);
+    pushArr(raw?.leaderboard_stats);
+
+    // Backward-compat fallbacks (older/other shapes)
+    pushArr(raw?.statGroups);
+    pushArr(raw?.stats);
+
+    if (!blocks.length && Array.isArray(raw)) pushArr(raw);
+
+    if (!blocks.length) {
+      if (debug) console.log('[worlds-edge][debug] normalizePrimaryStatSnapshot: no blocks found', { aoeProfileId, keys: Object.keys(raw ?? {}) });
+      return null;
+    }
+
     const looksLike1v1Rm = (g: any) => {
-      const lid = String(g?.leaderboard_id ?? g?.leaderboardId ?? '').toLowerCase();
-      const name = String(g?.name ?? g?.leaderboard_name ?? '').toLowerCase();
-      // heuristic only; upstream ids vary
+      const lid = String(g?.leaderboard_id ?? g?.leaderboardId ?? g?.leaderboard ?? '').toLowerCase();
+      const name = String(g?.name ?? g?.leaderboard_name ?? g?.leaderboardName ?? '').toLowerCase();
       return lid.includes('1v1') || name.includes('1v1') || name.includes('rm');
     };
 
-    // Prefer something that looks like 1v1 RM
-    const preferred = groups.find((g) => looksLike1v1Rm(g));
-    if (preferred) return extract(preferred);
+    const hasUsefulFields = (g: any) => {
+      const n = normalizeBlock(g);
+      return n.wins != null || n.losses != null || n.rank != null || n.rankTotal != null || n.streak != null || n.rating != null || n.leaderboardId != null;
+    };
 
-    // Otherwise pick first with rating or rank
-    const anyRated = groups.find((g) => g?.rating != null || g?.elo != null || g?.mmr != null || g?.rank != null);
-    if (anyRated) return extract(anyRated);
+    // Strategy:
+    // 1) prefer a block that looks like 1v1 RM AND has useful fields
+    // 2) otherwise first block with useful fields
+    // 3) otherwise first block
+    const preferred = blocks.find((b) => looksLike1v1Rm(b) && hasUsefulFields(b));
+    const fallback = blocks.find((b) => hasUsefulFields(b));
+    const chosen = preferred ?? fallback ?? blocks[0];
 
-    return extract(groups[0]);
+    const chosenNorm = normalizeBlock(chosen);
+
+    if (debug) {
+      console.log('[worlds-edge][debug] normalizePrimaryStatSnapshot: candidates', {
+        aoeProfileId,
+        totalBlocks: blocks.length,
+        chosenLeaderboardId: chosenNorm.leaderboardId,
+        chosenKeys: Object.keys(chosen ?? {}),
+      });
+      console.log('[worlds-edge][debug] normalizePrimaryStatSnapshot: chosenNormalized', chosenNorm);
+    }
+
+    return chosenNorm;
   }
 }

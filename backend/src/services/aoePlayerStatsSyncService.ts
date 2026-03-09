@@ -35,6 +35,9 @@ export class AoePlayerStatsSyncService {
     const id = String(aoeProfileId || '').trim();
     if (!id) return { ok: false, status: 'failed', aoeProfileId: id, reason: 'empty_aoeProfileId' };
 
+    // Targeted debug (safe): enabled only for a single profile id.
+    const debug = id === '11375082';
+
     try {
       const player = await prisma.aoePlayer.findUnique({
         where: { aoeProfileId: id },
@@ -52,7 +55,8 @@ export class AoePlayerStatsSyncService {
 
       let raw: any = null;
       if (profileName) {
-        const resp = await this.we.getPersonalStatByProfileNames([profileName]);
+        if (debug) console.log('[stats-sync][debug]', { aoeProfileId: id, lookup: 'profile_names', value: profileName });
+        const resp = await this.we.getPersonalStatByProfileNames([profileName], { debug });
         raw = Array.isArray(resp) ? resp[0] : resp;
       } else {
         // Conservative alias fallback: only if nickname is non-empty.
@@ -60,11 +64,12 @@ export class AoePlayerStatsSyncService {
         if (!alias) {
           return { ok: true, status: 'skipped', reason: 'not_enough_identity_for_stats_sync', aoeProfileId: id, aoePlayerId: player.id };
         }
-        const resp = await this.we.getPersonalStatByAliases([alias]);
+        if (debug) console.log('[stats-sync][debug]', { aoeProfileId: id, lookup: 'aliases', value: alias });
+        const resp = await this.we.getPersonalStatByAliases([alias], { debug });
         raw = Array.isArray(resp) ? resp[0] : resp;
       }
 
-      const normalized = this.we.normalizePrimaryStatSnapshot(raw);
+      const normalized = this.we.normalizePrimaryStatSnapshot(raw, { debug, aoeProfileId: id });
       if (!normalized) {
         return { ok: true, status: 'skipped', reason: 'no_stats_found', aoeProfileId: id, aoePlayerId: player.id };
       }
