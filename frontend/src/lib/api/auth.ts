@@ -14,15 +14,22 @@ export type MeResponse = {
     email?: string | null;
     displayName?: string | null;
     role?: string | null;
+
     steamConnected?: boolean;
     providers?: string[];
     avatarUrl?: string | null;
 
+    /**
+     * Source of truth for claim state is AoePlayer.claimedByUserId.
+     * This shape must match backend PublicUser.aoePlayer DTO.
+     */
     aoePlayer?: {
       id: string;
       aoeProfileId: string;
       aoeProfileUrl: string;
       nickname: string;
+      steamId?: string | null;
+      /** ISO string (backend serializes DateTime to ISO) */
       claimedAt?: string | null;
     } | null;
   } | null;

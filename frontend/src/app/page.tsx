@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import PlayerHud from "./components/PlayerHud";
+import { buildClaimedPlayerViewModel } from "../lib/map/claimedPlayerAdapter";
 import { useRouter } from "next/navigation";
 import * as PIXI from "pixi.js";
 import { Viewport } from "pixi-viewport";
@@ -45,7 +46,11 @@ type PlayerRec = {
   title?: string;
   desc?: string;
   avatar?: string;
-  // AOE2 Insights numeric user id (string to avoid accidental formatting changes)
+
+  /** Canonical map player reference to AoePlayer.aoeProfileId */
+  aoeProfileId?: string;
+
+  /** @deprecated legacy */
   insightsUserId?: string;
 };
 
@@ -660,80 +665,33 @@ export default function Home() {
   return (
     <div style={{ height: "100dvh", display: "flex", flexDirection: "column", overflow: "hidden" }}>
       {/* MOBA-like HUD top-right */}
-      {hasEntered && (
-        <PlayerHud
-          linkedPlayerName={(() => {
-            const p = (meUser as any)?.aoePlayer;
-            if (!p) return null;
-            return (p.nickname ?? p.id ?? "")?.toString?.() ?? null;
-          })()}
-          steamConnected={steamConnected}
-          steamLinkUrl={!steamConnected ? steamLinkUrl() : undefined}
-          onLogout={async () => {
-            try {
-              await logout();
-            } finally {
-              router.replace(`/login?next=${encodeURIComponent(nextUrl)}`);
-            }
-          }}
-          userId={(() => {
-            const insights = (meUser as any)?.aoePlayer?.aoeProfileId ?? (meUser as any)?.aoePlayer?.insightsUserId;
-            const insightsStr = insights != null ? String(insights).trim() : "";
-            return insightsStr || undefined;
-          })()}
-          tierLabel={(() => {
-            const insights = (meUser as any)?.aoePlayer?.aoeProfileId ?? (meUser as any)?.aoePlayer?.insightsUserId;
-            const insightsStr = insights != null ? String(insights).trim() : "";
-            const players = (payloadRef.current as any)?.players as Record<string, any> | undefined;
-            if (insightsStr && players) {
-              const hit = Object.entries(players).find(([, p]) => String((p as any)?.insightsUserId ?? "").trim() === insightsStr);
-              const rec = hit?.[1] as any;
-              const rawTier = (rec?.tier ?? "").toString().trim();
-              const rawLabel = (((rec as any)?.tierLabel) ?? "").toString().trim();
-              const raw = rawTier || rawLabel;
-              return raw || undefined;
-            }
-            return undefined;
-          })()}
-          nickname={(() => {
-            // Prefer authoritative player card from the map payload (players[uXXX])
-            // matched by insightsUserId.
-            const insights = (meUser as any)?.aoePlayer?.aoeProfileId ?? (meUser as any)?.aoePlayer?.insightsUserId;
-            const insightsStr = insights != null ? String(insights).trim() : "";
-            const players = (payloadRef.current as any)?.players as Record<string, any> | undefined;
-            if (insightsStr && players) {
-              const hit = Object.entries(players).find(([, p]) => String((p as any)?.insightsUserId ?? "").trim() === insightsStr);
-              const rec = hit?.[1] as any;
-              if (rec?.name) return String(rec.name);
-            }
-            return (meUser as any)?.aoePlayer?.nickname ?? (meUser as any)?.displayName ?? (meUser as any)?.email ?? "Игрок";
-          })()}
-          title={(() => {
-            const insights = (meUser as any)?.aoePlayer?.aoeProfileId ?? (meUser as any)?.aoePlayer?.insightsUserId;
-            const insightsStr = insights != null ? String(insights).trim() : "";
-            const players = (payloadRef.current as any)?.players as Record<string, any> | undefined;
-            if (insightsStr && players) {
-              const hit = Object.entries(players).find(([, p]) => String((p as any)?.insightsUserId ?? "").trim() === insightsStr);
-              const rec = hit?.[1] as any;
-              if (rec?.title) return String(rec.title);
-            }
-            return (meUser as any)?.role ? String((meUser as any)?.role) : "";
-          })()}
-          avatarUrl={(() => {
-            // Correct mapping: insightsUserId -> internal playerId (uXXX) -> /people/uXXX.png
-            const insights = (meUser as any)?.aoePlayer?.aoeProfileId ?? (meUser as any)?.aoePlayer?.insightsUserId;
-            const insightsStr = insights != null ? String(insights).trim() : "";
-            const players = (payloadRef.current as any)?.players as Record<string, any> | undefined;
-            if (insightsStr && players) {
-              const hit = Object.entries(players).find(([, p]) => String((p as any)?.insightsUserId ?? "").trim() === insightsStr);
-              const playerId = hit?.[0];
-              if (playerId) return `/people/${encodeURIComponent(playerId)}.png`;
-            }
-            return "/people/u001.png";
-          })()}
-          online={true}
-        />
-      )}
+      {hasEntered && (() => {
+        const vm = buildClaimedPlayerViewModel({
+          meUser,
+          mapPlayers: (payloadRef.current as any)?.players ?? null,
+          fallbackAvatarUrl: "/people/u001.png",
+        });
+
+        return (
+          <PlayerHud
+            linkedPlayerName={(meUser as any)?.aoePlayer?.nickname ?? null}
+            steamConnected={steamConnected}
+            steamLinkUrl={!steamConnected ? steamLinkUrl() : undefined}
+            onLogout={async () => {
+              try {
+                await logout();
+              } finally {
+                router.replace(`/login?next=${encodeURIComponent(nextUrl)}`);
+              }
+            }}
+            tierLabel={vm.tierLabel ?? undefined}
+            nickname={vm.nickname}
+            title={vm.title ?? ""}
+            avatarUrl={vm.avatarUrl ?? "/people/u001.png"}
+            online={true}
+          />
+        );
+      })()}
 
       <div
         style={{

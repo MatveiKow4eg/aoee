@@ -1,10 +1,10 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { me } from "../../lib/api/auth";
-import { claimAoePlayer, listClaimablePlayersFromMap, type AoePlayer } from "../../lib/api/aoePlayers";
+import { claimAoePlayer, listClaimCandidates, type AoePlayer, type ClaimCandidate } from "../../lib/api/aoePlayers";
 
 export default function ClaimPlayerPage() {
   const router = useRouter();
@@ -13,10 +13,10 @@ export default function ClaimPlayerPage() {
   const [isAuthed, setIsAuthed] = useState(false);
   const [claimed, setClaimed] = useState<AoePlayer | null>(null);
 
-  const [mapPlayers, setMapPlayers] = useState<Array<{ name: string; insightsUserId: string }>>([]);
+  const [candidates, setCandidates] = useState<ClaimCandidate[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isConfirmOpen, setIsConfirmOpen] = useState(false);
-  const [pendingPick, setPendingPick] = useState<{ name: string; insightsUserId: string } | null>(null);
+  const [pendingPick, setPendingPick] = useState<ClaimCandidate | null>(null);
   const [isClaiming, setIsClaiming] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -56,11 +56,11 @@ export default function ClaimPlayerPage() {
     setIsLoading(true);
 
     try {
-      const { items } = await listClaimablePlayersFromMap();
-      setMapPlayers(items);
+      const { items } = await listClaimCandidates();
+      setCandidates(items);
     } catch (e: any) {
       setError(e?.message ? String(e.message) : "Failed to load players");
-      setMapPlayers([]);
+      setCandidates([]);
     } finally {
       setIsLoading(false);
     }
@@ -111,7 +111,7 @@ export default function ClaimPlayerPage() {
         </div>
 
         <div style={{ marginTop: 12, opacity: 0.85, fontSize: 12 }}>
-          Players shown here come from the current map payload and exclude players already claimed by someone else.
+          Players shown here come from an official backend directory with a safe fallback to map payload.
         </div>
 
         {error && (
@@ -122,7 +122,7 @@ export default function ClaimPlayerPage() {
 
         <div style={{ marginTop: 14, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
           <div style={{ opacity: 0.75, fontSize: 12 }}>
-            {isLoading ? "Loading…" : mapPlayers.length ? `Loaded: ${mapPlayers.length}` : ""}
+            {isLoading ? "Loading…" : candidates.length ? `Loaded: ${candidates.length}` : ""}
           </div>
           <button
             onClick={() => load()}
@@ -134,16 +134,16 @@ export default function ClaimPlayerPage() {
           </button>
         </div>
 
-        <div style={{ marginTop: 18, opacity: 0.9, fontWeight: 900 }}>Players (legacy insightsUserId, transitional)</div>
+        <div style={{ marginTop: 18, opacity: 0.9, fontWeight: 900 }}>Players</div>
         <div style={{ marginTop: 10, border: "1px solid #3a2a1a", borderRadius: 12, overflow: "hidden" }}>
-          {mapPlayers.length === 0 ? (
-            <div style={{ padding: 14, opacity: 0.85 }}>(no players with insightsUserId found in current map payload)</div>
+          {candidates.length === 0 ? (
+            <div style={{ padding: 14, opacity: 0.85 }}>(no claim candidates found)</div>
           ) : (
             <div style={{ display: "flex", flexDirection: "column" }}>
-              {mapPlayers.map((p) => (
-                <div key={p.insightsUserId} style={{ display: "flex", gap: 12, alignItems: "center", padding: 12, borderTop: "1px solid rgba(255,255,255,0.08)" }}>
-                  <div style={{ minWidth: 0, flex: 1, fontWeight: 900, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={p.name}>
-                    {p.name}
+              {candidates.map((p) => (
+                <div key={p.aoeProfileId} style={{ display: "flex", gap: 12, alignItems: "center", padding: 12, borderTop: "1px solid rgba(255,255,255,0.08)" }}>
+                  <div style={{ minWidth: 0, flex: 1, fontWeight: 900, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={p.displayName}>
+                    {p.displayName}
                   </div>
                   <button
                     onClick={() => {
@@ -199,7 +199,7 @@ export default function ClaimPlayerPage() {
             >
               <div style={{ fontWeight: 900, fontSize: 18 }}>Confirm</div>
               <div style={{ marginTop: 10, opacity: 0.9, lineHeight: 1.4 }}>
-                Are you sure you want to register/claim as <b>{pendingPick.name}</b>?
+                Are you sure you want to register/claim as <b>{pendingPick.displayName}</b>?
               </div>
               <div style={{ marginTop: 14, display: "flex", gap: 10, justifyContent: "flex-end", flexWrap: "wrap" }}>
                 <button
@@ -226,8 +226,8 @@ export default function ClaimPlayerPage() {
                     setIsClaiming(true);
                     try {
                       const r = await claimAoePlayer({
-                        aoeProfileId: pendingPick.insightsUserId,
-                        nickname: pendingPick.name,
+                        aoeProfileId: pendingPick.aoeProfileId,
+                        nickname: pendingPick.displayName,
                       });
                       setClaimed(r.player);
                       setIsConfirmOpen(false);

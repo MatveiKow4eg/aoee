@@ -10,7 +10,6 @@ export type PlayerHudProps = {
   avatarUrl?: string | null;
   buildingUrl?: string | null;
   online?: boolean;
-  userId?: string | number;
 
   steamConnected?: boolean;
   steamLinkUrl?: string;
@@ -53,7 +52,7 @@ function mapTierToBuildingUrl(raw?: string | null): string | null {
   return map[key] ?? null;
 }
 
-export default function PlayerHud({ nickname, title, tierLabel, avatarUrl, buildingUrl, online, userId, steamConnected, steamLinkUrl, onLogout, linkedPlayerName }: PlayerHudProps) {
+export default function PlayerHud({ nickname, title, tierLabel, avatarUrl, buildingUrl, online, steamConnected, steamLinkUrl, onLogout, linkedPlayerName }: PlayerHudProps) {
   const [collapsed, setCollapsed] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   // Statistics (aoe2insights) removed in SteamID migration stage.

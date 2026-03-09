@@ -37,7 +37,33 @@ export async function listAvailableAoePlayers(args?: { q?: string; limit?: numbe
   return (await res.json()) as { items: AoePlayer[]; nextCursor: string | null };
 }
 
-export async function listClaimablePlayersFromMap(): Promise<{ items: { name: string; insightsUserId: string }[] }> {
+export type ClaimCandidateSource = "map_payload" | "player_directory";
+
+export type ClaimCandidate = {
+  aoeProfileId: string;
+  displayName: string;
+  source: ClaimCandidateSource;
+};
+
+// New official boundary: backend decides primary/fallback source.
+export async function listClaimCandidates(): Promise<{ items: ClaimCandidate[] }> {
+  const res = await fetch(`${API_ORIGIN}/api/aoe-players/claim-candidates`, {
+    method: "GET",
+    headers: { Accept: "application/json" },
+    cache: "no-store",
+    credentials: "include",
+  });
+
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    throw new Error(`Failed to load claimable players: ${res.status} ${text}`);
+  }
+
+  return (await res.json()) as { items: ClaimCandidate[] };
+}
+
+// Legacy/transitional: map-derived claim candidates
+export async function listClaimCandidatesFromMap(): Promise<{ items: ClaimCandidate[] }> {
   const res = await fetch(`${API_ORIGIN}/api/aoe-players/claimable-from-map`, {
     method: "GET",
     headers: { Accept: "application/json" },
@@ -50,7 +76,7 @@ export async function listClaimablePlayersFromMap(): Promise<{ items: { name: st
     throw new Error(`Failed to load claimable players: ${res.status} ${text}`);
   }
 
-  return (await res.json()) as { items: { name: string; insightsUserId: string }[] };
+  return (await res.json()) as { items: ClaimCandidate[] };
 }
 
 export async function claimAoePlayer(input: { aoeProfileId: string; nickname?: string }) {

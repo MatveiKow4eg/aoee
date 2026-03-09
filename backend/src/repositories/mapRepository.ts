@@ -117,8 +117,23 @@ export class MapRepository {
             await tx.mapPlayer.createMany({
               data: incomingKeys.map((playerKey) => {
                 const p = players[playerKey] ?? {};
-                const { x, y, tier, name, title, desc, ...rest } = p;
-                const extraJson = Object.keys(rest).length ? (rest as any) : null;
+
+                // Canonicalize player identity for storage:
+                // - prefer `aoeProfileId`
+                // - fallback to legacy `insightsUserId`
+                // - always persist back as `aoeProfileId` in extraJson (new canonical key)
+                const rawAoeProfileId =
+                  (p as any)?.aoeProfileId ??
+                  (p as any)?.insightsUserId ??
+                  null;
+                const aoeProfileId = rawAoeProfileId != null ? String(rawAoeProfileId).trim() : "";
+
+                const { x, y, tier, name, title, desc, aoeProfileId: _drop1, insightsUserId: _drop2, ...rest } = p;
+
+                const nextExtra: any = { ...rest };
+                if (aoeProfileId) nextExtra.aoeProfileId = aoeProfileId;
+
+                const extraJson = Object.keys(nextExtra).length ? (nextExtra as any) : null;
 
                 return {
                   mapStateId: state.id,

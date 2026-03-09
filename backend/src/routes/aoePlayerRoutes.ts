@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import rateLimit from 'express-rate-limit';
-import { getAvailableAoePlayers, getClaimablePlayersFromMap, postClaimAoePlayer } from '../controllers/aoePlayerController';
+import { getAvailableAoePlayers, getClaimCandidates, getClaimablePlayersFromMap, postClaimAoePlayer } from '../controllers/aoePlayerController';
+import { getAoePlayerStatsSnapshot } from '../controllers/aoePlayerStatsController';
 import { requireAuth } from '../middleware/auth';
 
 export const aoePlayerRoutes = Router();
@@ -20,7 +21,15 @@ const claimLimiter = rateLimit({
 });
 
 aoePlayerRoutes.get('/aoe-players/available', listLimiter, getAvailableAoePlayers);
-// New: claimable players directly from current map payload (excluding already-claimed)
+
+// Read-only stats snapshot (cached); does NOT call World’s Edge.
+aoePlayerRoutes.get('/aoe-players/:aoeProfileId/stats', listLimiter, getAoePlayerStatsSnapshot);
+
+// New official boundary: claim candidates sourced primarily from player directory (AoePlayer),
+// with safe fallback to map payload.
+aoePlayerRoutes.get('/aoe-players/claim-candidates', listLimiter, getClaimCandidates);
+
+// Legacy/transitional: claimable players directly from current map payload (excluding already-claimed)
 aoePlayerRoutes.get('/aoe-players/claimable-from-map', listLimiter, getClaimablePlayersFromMap);
 
 // requires login

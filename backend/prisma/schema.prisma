@@ -117,18 +117,37 @@ model Account {
 }
 
 model AoePlayer {
-  id              String    @id @default(cuid())
-  aoeProfileId    String    @unique @map("aoe_profile_id")
-  aoeProfileUrl   String    @map("aoe_profile_url")
+  id              String                 @id @default(cuid())
+  aoeProfileId    String                 @unique @map("aoe_profile_id")
+  aoeProfileUrl   String                 @map("aoe_profile_url")
   nickname        String
   // New: link existing player/profile by SteamID (filled manually by admin)
-  steamId         String?   @unique @map("steam_id")
-  claimedByUserId String?   @unique @map("claimed_by_user_id")
-  claimedAt       DateTime? @map("claimed_at")
-  createdAt       DateTime  @default(now()) @map("created_at")
-  updatedAt       DateTime  @updatedAt @map("updated_at")
-  claimedByUser   User?     @relation("AoePlayerClaim", fields: [claimedByUserId], references: [id])
+  steamId         String?                @unique @map("steam_id")
+  claimedByUserId String?                @unique @map("claimed_by_user_id")
+  claimedAt       DateTime?              @map("claimed_at")
+  createdAt       DateTime               @default(now()) @map("created_at")
+  updatedAt       DateTime               @updatedAt @map("updated_at")
+  claimedByUser   User?                  @relation("AoePlayerClaim", fields: [claimedByUserId], references: [id])
+  statSnapshot    AoePlayerStatSnapshot?
 
   @@index([claimedByUserId])
   @@map("aoe_players")
+}
+
+model AoePlayerStatSnapshot {
+  id           String   @id @default(cuid())
+  aoePlayerId  String   @unique @map("aoe_player_id")
+  leaderboardId String? @map("leaderboard_id")
+  rating       Int?
+  rank         Int?
+  rankTotal    Int?     @map("rank_total")
+  wins         Int?
+  losses       Int?
+  streak       Int?
+  syncedAt     DateTime @default(now()) @map("synced_at")
+
+  aoePlayer    AoePlayer @relation(fields: [aoePlayerId], references: [id], onDelete: Cascade)
+
+  @@index([syncedAt])
+  @@map("aoe_player_stat_snapshots")
 }

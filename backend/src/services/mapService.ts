@@ -14,7 +14,25 @@ export type MapStatePayloadV1 = {
       proj?: [number, number, number, number];
     }
   >;
-  players: Record<string, { x?: number; y?: number; tier?: string; name?: string; title?: string; desc?: string }>;
+  /**
+   * players payload:
+   * - NEW canonical reference: `aoeProfileId` (string)
+   * - Deprecated transitional fallback: `insightsUserId` (string)
+   */
+  players: Record<
+    string,
+    {
+      x?: number;
+      y?: number;
+      tier?: string;
+      name?: string;
+      title?: string;
+      desc?: string;
+      aoeProfileId?: string;
+      /** @deprecated legacy field kept for backward compatibility */
+      insightsUserId?: string;
+    }
+  >;
   meta?: unknown;
 };
 

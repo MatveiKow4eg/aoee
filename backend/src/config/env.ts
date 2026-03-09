@@ -8,6 +8,10 @@ const envSchema = z.object({
   PORT: z.coerce.number().int().positive().default(4000),
   CORS_ORIGINS: z.string().optional().default(''),
   DATABASE_URL: z.string().optional(),
+
+  // World’s Edge API (Age of Empires)
+  WORLDS_EDGE_API_BASE_URL: z.string().optional().default('https://aoe-api.worldsedgelink.com/community/leaderboard'),
+  WORLDS_EDGE_API_TIMEOUT_MS: z.coerce.number().int().positive().optional().default(7000),
 });
 
 export type Env = z.infer<typeof envSchema>;
