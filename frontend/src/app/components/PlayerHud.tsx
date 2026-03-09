@@ -16,6 +16,9 @@ export type PlayerHudProps = {
   onLogout?: () => void;
 
   linkedPlayerName?: string | null;
+
+  /** Canonical claimed AoE profile id (AoePlayer.aoeProfileId). Used to fetch cached stats from backend. */
+  aoeProfileId?: string | null;
 };
 
 function mapTierToBuildingUrl(raw?: string | null): string | null {
@@ -52,12 +55,18 @@ function mapTierToBuildingUrl(raw?: string | null): string | null {
   return map[key] ?? null;
 }
 
-export default function PlayerHud({ nickname, title, tierLabel, avatarUrl, buildingUrl, online, steamConnected, steamLinkUrl, onLogout, linkedPlayerName }: PlayerHudProps) {
+export default function PlayerHud({ nickname, title, tierLabel, avatarUrl, buildingUrl, online, steamConnected, steamLinkUrl, onLogout, linkedPlayerName, aoeProfileId }: PlayerHudProps) {
   const [collapsed, setCollapsed] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
-  // Statistics (aoe2insights) removed in SteamID migration stage.
-  // Keep UI stable without upstream HTML parsing.
   const [statsOpen, setStatsOpen] = useState(false);
+
+  const [statsState, setStatsState] = useState<
+    | { status: "idle" }
+    | { status: "loading" }
+    | { status: "ok"; data: any }
+    | { status: "empty" }
+    | { status: "error"; message: string }
+  >({ status: "idle" });
 
   const name = (nickname ?? "").trim() || "Player";
   const subtitle = (title ?? "").trim();
@@ -128,6 +137,79 @@ export default function PlayerHud({ nickname, title, tierLabel, avatarUrl, build
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [settingsOpen, statsOpen]);
+
+  useEffect(() => {
+    if (!statsOpen) return;
+
+    const id = (aoeProfileId ?? "").toString().trim();
+    if (!id) {
+      setStatsState({ status: "idle" });
+      return;
+    }
+
+    let cancelled = false;
+    setStatsState({ status: "loading" });
+
+    (async () => {
+      try {
+        const { getAoePlayerStats } = await import("../../lib/api/aoePlayerStats");
+        const r = await getAoePlayerStats(id);
+        if (cancelled) return;
+
+        const snap = (r as any)?.snapshot ?? null;
+        if (!snap) {
+          setStatsState({ status: "empty" });
+          return;
+        }
+
+        const wins = typeof snap.wins === "number" ? snap.wins : null;
+        const losses = typeof snap.losses === "number" ? snap.losses : null;
+        const total = wins != null && losses != null ? wins + losses : null;
+        const winRate =
+          typeof snap.winRate === "number"
+            ? snap.winRate
+            : total && wins != null
+              ? Math.round((wins / total) * 1000) / 10
+              : null;
+
+        const fmtInt = (v: any) => (typeof v === "number" && Number.isFinite(v) ? Math.round(v).toString() : "—");
+        const fmtPct = (v: any) => (typeof v === "number" && Number.isFinite(v) ? `${v.toFixed(1)}%` : "—");
+
+        const syncedAt = typeof snap.syncedAt === "string" ? snap.syncedAt : "";
+        const syncedAtLabel = syncedAt
+          ? (() => {
+              try {
+                return new Date(syncedAt).toLocaleString();
+              } catch {
+                return syncedAt;
+              }
+            })()
+          : "";
+
+        const vm = {
+          ratingLabel: fmtInt(snap.rating),
+          rankLabel:
+            typeof snap.rank === "number" && typeof snap.rankTotal === "number"
+              ? `${fmtInt(snap.rank)} / ${fmtInt(snap.rankTotal)}`
+              : fmtInt(snap.rank),
+          winsLabel: fmtInt(wins),
+          lossesLabel: fmtInt(losses),
+          winRateLabel: fmtPct(winRate),
+          streakLabel: fmtInt(snap.streak),
+          syncedAtLabel,
+        };
+
+        setStatsState({ status: "ok", data: vm });
+      } catch (e: any) {
+        if (cancelled) return;
+        setStatsState({ status: "error", message: e?.message ? String(e.message) : "Failed to load stats" });
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [statsOpen, aoeProfileId]);
 
   return (
     <div
@@ -389,9 +471,59 @@ export default function PlayerHud({ nickname, title, tierLabel, avatarUrl, build
                       </button>
                     </div>
 
-                    <div style={{ opacity: 0.9, lineHeight: 1.4 }}>
-                      Statistics are temporarily disabled while migrating away from aoe2insights.
-                    </div>
+                    {statsState.status === "idle" && (
+                      <div style={{ opacity: 0.9, lineHeight: 1.4 }}>Claim a player to see stats.</div>
+                    )}
+
+                    {statsState.status === "loading" && (
+                      <div style={{ opacity: 0.9, lineHeight: 1.4 }}>Loading…</div>
+                    )}
+
+                    {statsState.status === "empty" && (
+                      <div style={{ opacity: 0.9, lineHeight: 1.4 }}>No stats synced yet.</div>
+                    )}
+
+                    {statsState.status === "error" && (
+                      <div style={{ opacity: 0.9, lineHeight: 1.4 }}>
+                        Stats unavailable.
+                        <div style={{ marginTop: 6, opacity: 0.7, fontSize: 12, wordBreak: "break-word" }}>{statsState.message}</div>
+                      </div>
+                    )}
+
+                    {statsState.status === "ok" && (
+                      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, fontSize: 13 }}>
+                        <div style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
+                          <span style={{ opacity: 0.8 }}>Rating</span>
+                          <span style={{ fontWeight: 900 }}>{statsState.data.ratingLabel}</span>
+                        </div>
+                        <div style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
+                          <span style={{ opacity: 0.8 }}>Rank</span>
+                          <span style={{ fontWeight: 900 }}>{statsState.data.rankLabel}</span>
+                        </div>
+                        <div style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
+                          <span style={{ opacity: 0.8 }}>Wins</span>
+                          <span style={{ fontWeight: 900 }}>{statsState.data.winsLabel}</span>
+                        </div>
+                        <div style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
+                          <span style={{ opacity: 0.8 }}>Losses</span>
+                          <span style={{ fontWeight: 900 }}>{statsState.data.lossesLabel}</span>
+                        </div>
+                        <div style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
+                          <span style={{ opacity: 0.8 }}>Winrate</span>
+                          <span style={{ fontWeight: 900 }}>{statsState.data.winRateLabel}</span>
+                        </div>
+                        <div style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
+                          <span style={{ opacity: 0.8 }}>Streak</span>
+                          <span style={{ fontWeight: 900 }}>{statsState.data.streakLabel}</span>
+                        </div>
+
+                        {statsState.data.syncedAtLabel ? (
+                          <div style={{ gridColumn: "1 / -1", marginTop: 6, opacity: 0.7, fontSize: 12 }}>
+                            Updated: {statsState.data.syncedAtLabel}
+                          </div>
+                        ) : null}
+                      </div>
+                    )}
                   </div>
                 </>,
                 document.body

@@ -16,12 +16,6 @@ export type PublicUser = {
   // Optional: UI avatar (e.g. Steam avatar when linked)
   avatarUrl?: string | null;
 
-  // Legacy AoE2Insights fields (compat)
-  aoeProfileId?: string | null;
-  aoeProfileUrl?: string | null;
-  aoeNickname?: string | null;
-  aoeLinkedAt?: string | null;
-
   // New roster claim model
   aoePlayer?: {
     id: string;
@@ -147,11 +141,6 @@ export class AuthService {
       providers: extra?.providers ?? [],
 
       avatarUrl: extra?.avatarUrl ?? null,
-
-      aoeProfileId: user.aoeProfileId ?? null,
-      aoeProfileUrl: user.aoeProfileUrl ?? null,
-      aoeNickname: user.aoeNickname ?? null,
-      aoeLinkedAt: user.aoeLinkedAt ? new Date(user.aoeLinkedAt).toISOString() : null,
 
       aoePlayer: claimed
         ? {

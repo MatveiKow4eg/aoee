@@ -15,7 +15,21 @@ export type MapStatePayloadV1 = {
   >;
   // Player records may include extra profile fields used by the UI (admin edits):
   // name/title/desc are intentionally allowed and persisted.
-  players: Record<string, { x?: number; y?: number; tier?: string; name?: string; title?: string; desc?: string }>;
+  // Identity is canonicalized to `aoeProfileId` (string). Legacy `insightsUserId` may exist in old payloads.
+  players: Record<
+    string,
+    {
+      x?: number;
+      y?: number;
+      tier?: string;
+      name?: string;
+      title?: string;
+      desc?: string;
+      aoeProfileId?: string;
+      /** @deprecated legacy; should not be produced by admin/editor */
+      insightsUserId?: string;
+    }
+  >;
   meta?: unknown;
 };
 

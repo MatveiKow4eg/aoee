@@ -675,6 +675,7 @@ export default function Home() {
         return (
           <PlayerHud
             linkedPlayerName={(meUser as any)?.aoePlayer?.nickname ?? null}
+            aoeProfileId={(meUser as any)?.aoePlayer?.aoeProfileId ?? null}
             steamConnected={steamConnected}
             steamLinkUrl={!steamConnected ? steamLinkUrl() : undefined}
             onLogout={async () => {

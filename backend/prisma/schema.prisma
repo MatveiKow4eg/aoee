@@ -74,10 +74,6 @@ model User {
   isActive         Boolean    @default(true) @map("is_active")
   createdAt        DateTime   @default(now()) @map("created_at")
   updatedAt        DateTime   @updatedAt @map("updated_at")
-  aoeLinkedAt      DateTime?  @map("aoe_linked_at")
-  aoeNickname      String?    @map("aoe_nickname")
-  aoeProfileId     String?    @map("aoe_profile_id")
-  aoeProfileUrl    String?    @map("aoe_profile_url")
   accounts         Account[]
   aoePlayerClaimed AoePlayer? @relation("AoePlayerClaim")
   sessions         Session[]

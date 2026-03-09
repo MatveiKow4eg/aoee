@@ -26,23 +26,7 @@ export class AuthRepository {
     });
   }
 
-  /**
-   * @deprecated Transitional legacy. Kept only for backward-compat with old DTO flows.
-   * Source of truth for player binding is now AoePlayer.claimedByUserId.
-   * Do not use in new code.
-   */
-  async updateUserAoe2InsightsLink(userId: string, args: { aoeProfileId: string; aoeProfileUrl: string; aoeNickname: string; aoeLinkedAt?: Date }) {
-    return prisma.user.update({
-      where: { id: userId },
-      data: {
-        aoeProfileId: args.aoeProfileId,
-        aoeProfileUrl: args.aoeProfileUrl,
-        aoeNickname: args.aoeNickname,
-        aoeLinkedAt: args.aoeLinkedAt ?? new Date(),
-      },
-    });
-  }
-
+  
   async createUser(args: { email: string; passwordHash: string }) {
     return prisma.user.create({
       data: {
