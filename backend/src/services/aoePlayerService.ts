@@ -37,7 +37,9 @@ export class AoePlayerService {
     const { aoeProfileId, nickname } = claimSchema.parse(body);
 
     const safeNickname = (nickname ?? '').trim();
-    const computedUrl = `https://www.aoe2insights.com/user/${encodeURIComponent(aoeProfileId)}/`;
+    // Transitional legacy: do NOT generate aoe2insights profile URLs automatically.
+    // aoeProfileUrl remains in schema for backward-compat, but is not source of truth.
+    const computedUrl = '';
 
     const already = await this.repo.findClaimedByUserId(userId);
     if (already) {

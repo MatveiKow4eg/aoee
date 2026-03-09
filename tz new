@@ -1,0 +1,264 @@
+Ты уже провёл аудит проекта. Теперь твоя задача — выполнить РЕФАКТОРИНГ проекта по новой целевой архитектуре.
+
+ВАЖНО:
+- Работай строго на основе найденного в аудите.
+- Не делай абстрактных улучшений “заодно”.
+- Не меняй лишнее.
+- Цель: убрать зависимость от aoe2insights и перевести систему на логику SteamID -> existing player auto-link.
+- После внесения изменений выдай полный CHANGE REPORT с точными файлами, дифф-логикой, новыми data shapes и ручным тест-планом.
+
+# Целевая архитектура
+
+Новая логика должна быть такой:
+
+1. В БД уже существуют игровые профили.
+2. Я вручную заполняю Steam ID у существующих игровых профилей.
+3. Пользователь логинится через Steam.
+4. После успешного Steam OpenID callback система получает steamId.
+5. Система ищет существующий профиль игрока по steamId.
+6. Если профиль найден:
+   - НЕ создавать новый профиль игрока
+   - НЕ создавать дубликат
+   - автоматически привязать текущего user к уже существующему player/profile
+   - после логина пользователь должен считаться “claimed” на этот профиль
+7. Если профиль не найден:
+   - логин НЕ должен падать
+   - пользователь просто остаётся без привязанного player/profile
+   - фронт должен корректно отправить его в fallback flow
+8. Система больше не должна зависеть от aoe2insights HTML parsing, aoe2insights profile URLs и aoe2insights statistics route.
+
+# Что нужно сделать
+
+## 1. Prisma / DB refactor
+
+На основе текущей схемы сделай минимально инвазивный вариант.
+
+Используй существующую модель `AoePlayer` как текущую сущность player/profile, но отвяжи её от aoe2insights как от обязательного источника.
+
+### Сделай:
+- добавь в `AoePlayer` новое nullable unique поле:
+  - `steamId String? @unique @map("steam_id")`
+- НЕ удаляй сразу старые поля `aoeProfileId`, `aoeProfileUrl`, `nickname`, если они ещё нужны для совместимости
+- подготовь Prisma migration
+
+### Также:
+- НЕ удаляй сразу legacy-поля `users.aoe_*`, если они ещё участвуют в DTO
+- но перестань использовать их как source of truth
+
+## 2. Source of truth for player binding
+
+После рефакторинга source of truth должен быть:
+- `AoePlayer.claimedByUserId`
+- `AoePlayer.steamId` для auto-link поиска
+
+Legacy-поля в `users` больше не должны использоваться как основная привязка.
+
+## 3. Переписать Steam auto-link
+
+Перепиши:
+- `backend/src/services/steamAutoLinkService.ts`
+- всё, что нужно вокруг него
+
+### Новая логика `tryAutoLinkSteamToAoe`:
+Вход:
+- `userId`
+- `steamId`
+- `steamNickname` можно оставить в сигнатуре только если реально нужен, иначе убрать
+
+Поведение:
+1. Ищи `AoePlayer` по `steamId`
+2. Если player не найден:
+   - вернуть `{ linked: false, reason: 'player_not_found_for_steam_id' }`
+3. Если найден и уже claimed другим user:
+   - вернуть `{ linked: false, reason: 'already_claimed_by_another_user' }`
+4. Если найден и уже claimed этим же user:
+   - вернуть `{ linked: true, reason: 'already_linked' }`
+5. Если найден и свободен:
+   - выполнить atomic claim
+   - вернуть `{ linked: true, reason: 'linked_by_steam_id' }`
+
+### Важно:
+- больше НЕ использовать:
+  - map payload nickname matching
+  - `players[*].insightsUserId`
+  - `normalizeNickname`
+  - AoE2Insights search / parsing
+- если `steamNickname` после этого нигде не нужен — убери его использование
+
+## 4. Обновить Steam callback flow
+
+Перепиши нужные места в:
+- `backend/src/steam/routes.ts`
+
+### Нужно:
+- после успешного Steam login вызывать новый auto-link по `steamId`
+- поведение login должно быть устойчивым:
+  - даже если auto-link не нашёл player profile, login успешен
+  - session создаётся как и раньше
+- в логах/ответах аккуратно отражай причину auto-link результата
+
+## 5. Auth / me response refactor
+
+Проверь:
+- `backend/src/services/authService.ts`
+- `backend/src/repositories/authRepository.ts`
+- frontend типы для `me()`
+
+### Нужно:
+- оставить возвращение `user.aoePlayer`, чтобы не ломать фронт резко
+- но DTO должны отражать актуальную модель:
+  - `aoePlayer` может содержать `steamId`
+- legacy `users.aoe_*` поля:
+  - не использовать в новой логике
+  - не обновлять автоматически через aoe2insights link flow
+- если `updateUserAoe2InsightsLink()` больше не нужен — пометь как unused и убери, если это безопасно
+
+## 6. Убрать aoe2insights statistics flow
+
+По аудиту фронт сейчас зависит от:
+- `frontend/src/app/api/aoe2insights/statistics/route.ts`
+- `frontend/src/app/api/img/route.ts`
+- `frontend/src/app/components/PlayerHud.tsx`
+- `frontend/src/app/page.tsx`
+- `frontend/next.config.ts`
+
+### Нужно:
+1. Полностью убрать вызовы `/api/aoe2insights/statistics`
+2. Удалить статистику/рейтинг, которые брались через aoe2insights HTML parsing
+3. В `PlayerHud`:
+   - убрать fetch aoe2insights statistics
+   - убрать зависимость от `matchesPlayed.total` как rating
+   - если нужно, временно показывать только nickname/avatar/status без статистики
+4. В `page.tsx`:
+   - убрать building card statistics fetch из aoe2insights
+   - убрать использование `insightsUserId` как источника userId для статистики
+5. Удалить:
+   - `frontend/src/app/api/aoe2insights/statistics/route.ts`
+   - `frontend/src/app/api/img/route.ts` если он больше нигде не нужен
+6. Убрать `aoe2insights.com` из `frontend/next.config.ts`, если после изменений он больше не нужен
+
+## 7. Убрать зависимость onboarding/claim flow от insightsUserId
+
+По аудиту сейчас:
+- `claim-player` и backend `claimable-from-map` используют `players[*].insightsUserId`
+- `AoePlayerService.claimForCurrentUser()` использует `aoeProfileId` и строит `aoeProfileUrl`
+
+### Нужно принять и реализовать временную переходную стратегию:
+
+#### Временная безопасная стратегия:
+- ручной claim flow пока НЕ удаляй полностью, если он нужен как fallback
+- но перестрой его так, чтобы он не требовал aoe2insights URL как обязательную сущность
+
+### Сделай:
+1. В `claim-player` UI убери тексты/ссылки, которые завязаны на “Open AoE2Insights profile”
+2. В backend `claimForCurrentUser()`:
+   - не генерируй `aoeProfileUrl` автоматически через aoe2insights URL
+   - если поле ещё существует, оставь nullable / пустым
+3. В `claimable-from-map`:
+   - если payload карты всё ещё содержит `insightsUserId`, не ломай это место полностью прямо сейчас
+   - но пометь как transitional legacy source
+4. Если для стабильной работы фронта пока нужен идентификатор из map payload:
+   - используй его временно
+   - но не строй на нём новую архитектуру auto-link
+
+## 8. Удалить/очистить backend aoe2insights service
+
+Проверь:
+- `backend/src/services/aoe2insightsService.ts`
+
+### Нужно:
+- если кроме `normalizeNickname` ничего больше не используется — удалить файл полностью
+- если после рефакторинга не используется и `normalizeNickname` — удалить импорт и сам файл
+- убедиться, что после этого нет broken imports
+
+## 9. Сохранить работоспособность карты и gating
+
+После изменений должно остаться рабочим:
+- login через Steam
+- `GET /api/auth/me`
+- определение, есть ли у пользователя `user.aoePlayer`
+- redirect logic на фронте:
+  - если есть claimed profile -> карта открывается
+  - если нет -> fallback onboarding / claim-player
+
+### Важно:
+Не ломай карту из-за удаления статистики.
+Лучше временно убрать блоки статистики, чем оставить падающие запросы.
+
+## 10. Не делай пока этого
+На этом этапе:
+- НЕ удаляй legacy поля `users.aoe_*` миграцией, если это требует большой каскад
+- НЕ переименовывай глобально `AoePlayer` в новую модель
+- НЕ делай большую новую доменную архитектуру
+- НЕ внедряй World’s Edge API в этом же шаге, если это не обязательно для компиляции
+
+Текущий этап — это:
+1. убрать aoe2insights
+2. перевести auto-link на steamId
+3. сохранить работающий login + claimed profile flow
+
+# Что хочу получить в ответ
+
+После завершения изменений выдай подробный CHANGE REPORT со структурой:
+
+## A. Summary
+- что именно изменено
+- что удалено
+- что переписано
+- что оставлено как legacy/transitional
+
+## B. Prisma / DB changes
+- точный diff schema
+- новая migration
+- какие поля добавлены
+- какие поля теперь source of truth
+
+## C. Backend changes
+Для каждого файла:
+- path
+- что было
+- что стало
+- почему
+
+## D. Frontend changes
+Для каждого файла:
+- path
+- что было
+- что стало
+- какой UI behaviour изменился
+
+## E. Deleted files
+Список файлов, удалённых полностью
+
+## F. Transitional legacy
+Список вещей, которые ещё остались временно:
+- `aoeProfileId`
+- `aoeProfileUrl`
+- `users.aoe_*`
+- `insightsUserId` в map payload
+и почему они пока оставлены
+
+## G. Manual test checklist
+Дай чёткий тест-план:
+1. Steam login, player найден по steamId
+2. Steam login, player не найден
+3. Steam login, player уже claimed другим user
+4. Existing session + `/api/auth/me`
+5. Карта открывается при наличии claim
+6. Redirect на fallback при отсутствии claim
+7. Страница claim-player не падает
+8. Нет вызовов aoe2insights routes
+9. Нет broken imports / build passes
+
+## H. Open follow-up tasks
+Что потом надо сделать следующим этапом:
+- полное удаление legacy fields
+- отказ от `insightsUserId` в map payload
+- внедрение World’s Edge API
+- redesign player/profile model
+
+# Формат работы
+- Внеси изменения в код
+- Покажи конкретные изменения
+- Не ограничивайся общими словами
+- Если где-то есть сомнение, выбирай минимально ломающий и компилируемый вариант

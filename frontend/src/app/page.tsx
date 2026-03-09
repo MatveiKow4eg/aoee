@@ -210,50 +210,17 @@ export default function Home() {
   const [meUser, setMeUser] = useState<MeResponse["user"] | null>(null);
   const nextUrl = useMemo(() => "/", []);
   const [isDetailsOpen, setIsDetailsOpen] = useState(false);
-  const [isStatsOpen, setIsStatsOpen] = useState(false);
-  const [statsUserId, setStatsUserId] = useState<string | null>(null);
-  const [statsLoading, setStatsLoading] = useState(false);
-  const [statsError, setStatsError] = useState<string | null>(null);
-  const [statsData, setStatsData] = useState<any | null>(null);
 
   const openBuildingCard = useCallback((tier: TierKey) => {
     setCardTier(tier);
     setIsBuildingCardOpen(true);
     setIsDetailsOpen(false);
-    setIsStatsOpen(false);
-    setStatsError(null);
-    setStatsData(null);
-
-    // Determine playerId for this building with normalized tier matching
-    const pl = payloadRef.current;
-    const players = (pl as any)?.players as Record<string, PlayerRec> | undefined;
-    const found = players
-      ? Object.entries(players)
-          .filter(([, p]) => normalizeTierKey(p, (pl as any)?.meta) === tier)
-          .sort(([a], [b]) => (a === "u001" ? -1 : b === "u001" ? 1 : a === "u003" ? -1 : b === "u003" ? 1 : 0))[0]
-      : undefined;
-    const playerId = found?.[0] ?? null;
-    const playerRec = playerId && players ? players[playerId] : undefined;
-
-    // Prefer explicit insightsUserId from player record.
-    // If not set, fallback to taking digits from uXXX (e.g. u001 -> 001 -> 1).
-    const explicit = (playerRec as any)?.insightsUserId;
-    const explicitClean = typeof explicit === "string" && explicit.trim() ? explicit.trim() : null;
-
-    const fromU = playerId && /^u\d+$/i.test(playerId) ? playerId.replace(/^u/i, "") : null;
-    const fromUNum = fromU ? String(Number(fromU)) : null;
-
-    setStatsUserId(explicitClean ?? fromUNum);
   }, []);
 
   const closeBuildingCard = useCallback(() => {
     setIsBuildingCardOpen(false);
     setCardTier(null);
     setIsDetailsOpen(false);
-    setIsStatsOpen(false);
-    setStatsLoading(false);
-    setStatsError(null);
-    setStatsData(null);
   }, []);
 
   const center = useCallback(() => {
@@ -1059,7 +1026,6 @@ export default function Home() {
                     <button
                       onClick={() => {
                         setIsDetailsOpen((v) => !v);
-                        setIsStatsOpen(false);
                       }}
                       style={{
                         padding: "10px 14px",
@@ -1075,114 +1041,10 @@ export default function Home() {
                       {isDetailsOpen ? "Скрыть детали" : "Показать детали"}
                     </button>
 
-                    <button
-                      onClick={async () => {
-                        setIsStatsOpen(true);
-                        setIsDetailsOpen(false);
-                        setStatsError(null);
-
-                        const userId = statsUserId;
-                        if (!userId) {
-                          setStatsError("Для этого игрока не задан AOE2 Insights userId");
-                          return;
-                        }
-
-                        // if already loaded for same user - do nothing
-                        if (statsData && (statsData as any)?.userId?.toString?.() === userId) return;
-
-                        try {
-                          setStatsLoading(true);
-                          setStatsData(null);
-                          const r = await fetch(`/api/aoe2insights/statistics?userId=${encodeURIComponent(userId)}`);
-                          if (!r.ok) throw new Error(`HTTP ${r.status}`);
-                          const j = await r.json();
-                          setStatsData(j);
-                        } catch (e: any) {
-                          setStatsError(e?.message ? String(e.message) : "Не удалось загрузить статистику");
-                        } finally {
-                          setStatsLoading(false);
-                        }
-                      }}
-                      style={{
-                        padding: "10px 14px",
-                        borderRadius: 10,
-                        border: "1px solid rgba(247,240,223,0.25)",
-                        background: "rgba(202,162,77,0.18)",
-                        color: "#f7f0df",
-                        cursor: "pointer",
-                        fontWeight: 900,
-                      }}
-                      title={statsUserId ? `Статистика (userId=${statsUserId})` : "Статистика"}
-                    >
-                      Статистика
-                    </button>
+                    {/* Statistics removed (aoe2insights dependency) */}
                   </div>
 
-                  {isStatsOpen && (
-                    <div
-                      style={{
-                        width: "100%",
-                        border: "1px solid rgba(202,162,77,0.35)",
-                        borderRadius: 12,
-                        padding: 12,
-                        background: "rgba(0,0,0,0.18)",
-                      }}
-                    >
-                      {statsLoading && <div style={{ opacity: 0.9, textAlign: "center" }}>Загрузка...</div>}
-                      {statsError && <div style={{ color: "#ffb4b4", textAlign: "center" }}>{statsError}</div>}
-
-                      {!statsLoading && !statsError && statsData && (
-                        <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-                          
-                          <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 10 }}>
-                            <div style={{ border: "1px solid rgba(255,255,255,0.14)", borderRadius: 12, padding: 10 }}>
-                              <div style={{ opacity: 0.75, fontSize: 12, fontWeight: 800 }}>Matches played</div>
-                              <div style={{ fontWeight: 900, fontSize: 16 }}>
-                                {(statsData as any)?.matchesPlayed?.total ?? "—"}
-                              </div>
-                              {(statsData as any)?.matchesPlayed?.mostOnText && (
-                                <div style={{ opacity: 0.85, fontSize: 12, marginTop: 6 }}>
-                                  {(statsData as any)?.matchesPlayed?.mostOnText}
-                                </div>
-                              )}
-                            </div>
-
-                            {(["overallBestCiv", "overallBestMap", "overallBestPosition"] as const).map((k) => {
-                              const v = (statsData as any)?.[k];
-                              if (!v) return null;
-                              const title = k === "overallBestCiv" ? "Best civ" : k === "overallBestMap" ? "Best map" : "Best position";
-                              return (
-                                <div key={k} style={{ border: "1px solid rgba(255,255,255,0.14)", borderRadius: 12, padding: 10 }}>
-                                  <div style={{ opacity: 0.75, fontSize: 12, fontWeight: 800 }}>{title}</div>
-                                  <div style={{ display: "flex", gap: 10, marginTop: 8, alignItems: "center" }}>
-                                    {v.imageUrl ? (
-                                      // eslint-disable-next-line @next/next/no-img-element
-                                      <img src={v.imageUrl} alt={v.name} style={{ width: 42, height: 42, objectFit: "contain" }} />
-                                    ) : (
-                                      <div style={{ width: 42, height: 42, background: "rgba(255,255,255,0.08)", borderRadius: 8 }} />
-                                    )}
-                                    <div style={{ minWidth: 0 }}>
-                                      <div style={{ fontWeight: 900, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={v.name}>
-                                        {v.name || "—"}
-                                      </div>
-                                      {v.winRateText && <div style={{ opacity: 0.9, fontSize: 12 }}>{v.winRateText}</div>}
-                                      {v.matchesText && <div style={{ opacity: 0.8, fontSize: 12 }}>{v.matchesText}</div>}
-                                    </div>
-                                  </div>
-                                </div>
-                              );
-                            })}
-                          </div>
-
-                                                  </div>
-                      )}
-
-                      {!statsLoading && !statsError && !statsData && (
-                        <div style={{ opacity: 0.8, textAlign: "center" }}>(нет данных)</div>
-                      )}
-                    </div>
-                  )}
-
+                  
                   {isDetailsOpen && (
                     <div style={{ width: "100%" }}>
                       {title && (

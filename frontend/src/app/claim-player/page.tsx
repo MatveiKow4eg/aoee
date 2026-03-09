@@ -90,12 +90,7 @@ export default function ClaimPlayerPage() {
         <div style={{ maxWidth: 720, margin: "0 auto", border: "1px solid #3a2a1a", borderRadius: 12, padding: 16, background: "rgba(0,0,0,0.25)" }}>
           <div style={{ fontWeight: 900, fontSize: 18, marginBottom: 10 }}>Player already claimed</div>
           <div style={{ opacity: 0.9, lineHeight: 1.4 }}>
-            You are linked to: <b>{claimed.nickname}</b> (AoE2Insights id: {claimed.aoeProfileId})
-          </div>
-          <div style={{ marginTop: 10 }}>
-            <a href={claimed.aoeProfileUrl} target="_blank" rel="noreferrer" style={{ color: "#caa24d", fontWeight: 900, textDecoration: "none" }}>
-              Open AoE2Insights profile
-            </a>
+            You are linked to: <b>{claimed.nickname}</b>
           </div>
           <div style={{ marginTop: 14, display: "flex", gap: 12, flexWrap: "wrap" }}>
             <Link href="/" style={{ color: "#caa24d", fontWeight: 900, textDecoration: "none" }}>Go to map</Link>
@@ -110,13 +105,13 @@ export default function ClaimPlayerPage() {
     <div style={{ minHeight: "100dvh", padding: 16, background: "#0b1220", color: "#f7f0df" }}>
       <div style={{ maxWidth: 980, margin: "0 auto" }}>
         <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
-          <div style={{ fontWeight: 900, fontSize: 18 }}>Claim your AoE2Insights player</div>
+          <div style={{ fontWeight: 900, fontSize: 18 }}>Claim your player</div>
           <div style={{ flex: 1 }} />
           <Link href="/" style={{ color: "#caa24d", fontWeight: 900, textDecoration: "none" }}>Back to map</Link>
         </div>
 
         <div style={{ marginTop: 12, opacity: 0.85, fontSize: 12 }}>
-          Players shown here come from the current map payload and exclude AoE2Insights users already claimed by someone else.
+          Players shown here come from the current map payload and exclude players already claimed by someone else.
         </div>
 
         {error && (
@@ -139,7 +134,7 @@ export default function ClaimPlayerPage() {
           </button>
         </div>
 
-        <div style={{ marginTop: 18, opacity: 0.9, fontWeight: 900 }}>Players with insightsUserId</div>
+        <div style={{ marginTop: 18, opacity: 0.9, fontWeight: 900 }}>Players (legacy insightsUserId, transitional)</div>
         <div style={{ marginTop: 10, border: "1px solid #3a2a1a", borderRadius: 12, overflow: "hidden" }}>
           {mapPlayers.length === 0 ? (
             <div style={{ padding: 14, opacity: 0.85 }}>(no players with insightsUserId found in current map payload)</div>

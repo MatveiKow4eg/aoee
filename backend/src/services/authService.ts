@@ -28,6 +28,7 @@ export type PublicUser = {
     aoeProfileId: string;
     aoeProfileUrl: string;
     nickname: string;
+    steamId?: string | null;
     claimedAt?: string | null;
   } | null;
 };
@@ -158,6 +159,7 @@ export class AuthService {
             aoeProfileId: claimed.aoeProfileId,
             aoeProfileUrl: claimed.aoeProfileUrl,
             nickname: claimed.nickname,
+            steamId: claimed.steamId ?? null,
             claimedAt: claimed.claimedAt ? new Date(claimed.claimedAt).toISOString() : null,
           }
         : null,
