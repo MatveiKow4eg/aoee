@@ -170,10 +170,11 @@ export class WorldsEdgeApiService {
     const list = Array.from(new Set(aliases.map((s) => String(s || '').trim()).filter(Boolean)));
     if (list.length === 0) return [] as WorldsEdgePersonalStatResponse[];
 
-    // NOTE: aliases can contain spaces/special chars; use URLSearchParams.
+    // NOTE: Worlds Edge expects JSON array string in query param, e.g. aliases=["AoEE. Tsumi"].
+    // URLSearchParams will URL-encode the JSON string safely.
     const url = new URL(`${this.baseUrl}/GetPersonalStat`);
     url.searchParams.set('title', 'age2');
-    url.searchParams.set('aliases', list.join(','));
+    url.searchParams.set('aliases', JSON.stringify(list));
 
     const res = await withTimeout(
       fetch(url.toString(), {
@@ -198,7 +199,8 @@ export class WorldsEdgeApiService {
 
     const url = new URL(`${this.baseUrl}/GetPersonalStat`);
     url.searchParams.set('title', 'age2');
-    url.searchParams.set('profile_names', list.join(','));
+    // Worlds Edge expects JSON array string in query param, e.g. profile_names=["/steam/7656..."].
+    url.searchParams.set('profile_names', JSON.stringify(list));
 
     const res = await withTimeout(
       fetch(url.toString(), {
