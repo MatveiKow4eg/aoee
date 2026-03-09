@@ -39,3 +39,30 @@ export async function getAoePlayerStats(aoeProfileId: string): Promise<{
 
   return (await res.json()) as any;
 }
+
+export type RefreshAoePlayerStatsResponse = {
+  aoeProfileId: string;
+  refreshed: boolean;
+  reason?: string;
+  source: "cached_worlds_edge";
+  snapshot: AoePlayerStatsSnapshot | null;
+};
+
+export async function refreshAoePlayerStats(aoeProfileId: string): Promise<RefreshAoePlayerStatsResponse> {
+  const res = await fetch(
+    `${API_ORIGIN}/api/aoe-players/${encodeURIComponent(aoeProfileId)}/stats/refresh`,
+    {
+      method: "POST",
+      headers: { Accept: "application/json" },
+      cache: "no-store",
+      credentials: "include",
+    }
+  );
+
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    throw new Error(`Failed to refresh stats: ${res.status} ${text}`);
+  }
+
+  return (await res.json()) as any;
+}

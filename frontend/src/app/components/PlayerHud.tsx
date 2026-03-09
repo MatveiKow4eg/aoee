@@ -63,10 +63,14 @@ export default function PlayerHud({ nickname, title, tierLabel, avatarUrl, build
   const [statsState, setStatsState] = useState<
     | { status: "idle" }
     | { status: "loading" }
+    | { status: "refreshing" }
     | { status: "ok"; data: any }
     | { status: "empty" }
     | { status: "error"; message: string }
   >({ status: "idle" });
+
+  const [refreshError, setRefreshError] = useState<string | null>(null);
+  const [isRefreshing, setIsRefreshing] = useState(false);
 
   const name = (nickname ?? "").trim() || "Player";
   const subtitle = (title ?? "").trim();
@@ -138,71 +142,123 @@ export default function PlayerHud({ nickname, title, tierLabel, avatarUrl, build
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [settingsOpen, statsOpen]);
 
+  const buildStatsVm = (snap: any) => {
+    const wins = typeof snap?.wins === "number" ? snap.wins : null;
+    const losses = typeof snap?.losses === "number" ? snap.losses : null;
+    const total = wins != null && losses != null ? wins + losses : null;
+    const winRate =
+      typeof snap?.winRate === "number"
+        ? snap.winRate
+        : total && wins != null
+          ? Math.round((wins / total) * 1000) / 10
+          : null;
+
+    const fmtInt = (v: any) => (typeof v === "number" && Number.isFinite(v) ? Math.round(v).toString() : "—");
+    const fmtPct = (v: any) => (typeof v === "number" && Number.isFinite(v) ? `${v.toFixed(1)}%` : "—");
+
+    const syncedAt = typeof snap?.syncedAt === "string" ? snap.syncedAt : "";
+    const syncedAtLabel = syncedAt
+      ? (() => {
+          try {
+            return new Date(syncedAt).toLocaleString();
+          } catch {
+            return syncedAt;
+          }
+        })()
+      : "";
+
+    return {
+      ratingLabel: fmtInt(snap?.rating),
+      rankLabel:
+        typeof snap?.rank === "number" && typeof snap?.rankTotal === "number"
+          ? `${fmtInt(snap.rank)} / ${fmtInt(snap.rankTotal)}`
+          : fmtInt(snap?.rank),
+      winsLabel: fmtInt(wins),
+      lossesLabel: fmtInt(losses),
+      winRateLabel: fmtPct(winRate),
+      streakLabel: fmtInt(snap?.streak),
+      syncedAtLabel,
+    };
+  };
+
+  const onManualRefresh = async () => {
+    const id = (aoeProfileId ?? "").toString().trim();
+    if (!id || isRefreshing) return;
+
+    setStatsState({ status: "refreshing" });
+    setIsRefreshing(true);
+    setRefreshError(null);
+
+    try {
+      const { refreshAoePlayerStats } = await import("../../lib/api/aoePlayerStats");
+      const rr = await refreshAoePlayerStats(id);
+      const snap = (rr as any)?.snapshot ?? null;
+
+      if (snap) {
+        setStatsState({ status: "ok", data: buildStatsVm(snap) });
+      } else {
+        setStatsState({ status: "empty" });
+        setRefreshError((rr as any)?.reason ? `Refresh skipped: ${(rr as any).reason}` : "No stats available yet.");
+      }
+    } catch (e: any) {
+      setRefreshError(e?.message ? String(e.message) : "Failed to refresh stats");
+      setStatsState((prev) => (prev.status === "ok" ? prev : { status: "empty" }));
+    } finally {
+      setIsRefreshing(false);
+    }
+  };
+
   useEffect(() => {
     if (!statsOpen) return;
 
     const id = (aoeProfileId ?? "").toString().trim();
     if (!id) {
       setStatsState({ status: "idle" });
+      setRefreshError(null);
+      setIsRefreshing(false);
       return;
     }
 
     let cancelled = false;
     setStatsState({ status: "loading" });
+    setRefreshError(null);
+    setIsRefreshing(false);
 
     (async () => {
       try {
-        const { getAoePlayerStats } = await import("../../lib/api/aoePlayerStats");
+        const { getAoePlayerStats, refreshAoePlayerStats } = await import("../../lib/api/aoePlayerStats");
         const r = await getAoePlayerStats(id);
         if (cancelled) return;
 
         const snap = (r as any)?.snapshot ?? null;
-        if (!snap) {
-          setStatsState({ status: "empty" });
+        if (snap) {
+          setStatsState({ status: "ok", data: buildStatsVm(snap) });
           return;
         }
 
-        const wins = typeof snap.wins === "number" ? snap.wins : null;
-        const losses = typeof snap.losses === "number" ? snap.losses : null;
-        const total = wins != null && losses != null ? wins + losses : null;
-        const winRate =
-          typeof snap.winRate === "number"
-            ? snap.winRate
-            : total && wins != null
-              ? Math.round((wins / total) * 1000) / 10
-              : null;
+        // Lazy auto-refresh ONLY when snapshot is null.
+        setStatsState({ status: "refreshing" });
+        setIsRefreshing(true);
 
-        const fmtInt = (v: any) => (typeof v === "number" && Number.isFinite(v) ? Math.round(v).toString() : "—");
-        const fmtPct = (v: any) => (typeof v === "number" && Number.isFinite(v) ? `${v.toFixed(1)}%` : "—");
+        const rr = await refreshAoePlayerStats(id);
+        if (cancelled) return;
 
-        const syncedAt = typeof snap.syncedAt === "string" ? snap.syncedAt : "";
-        const syncedAtLabel = syncedAt
-          ? (() => {
-              try {
-                return new Date(syncedAt).toLocaleString();
-              } catch {
-                return syncedAt;
-              }
-            })()
-          : "";
+        const refreshedSnap = (rr as any)?.snapshot ?? null;
+        if (refreshedSnap) {
+          setStatsState({ status: "ok", data: buildStatsVm(refreshedSnap) });
+          return;
+        }
 
-        const vm = {
-          ratingLabel: fmtInt(snap.rating),
-          rankLabel:
-            typeof snap.rank === "number" && typeof snap.rankTotal === "number"
-              ? `${fmtInt(snap.rank)} / ${fmtInt(snap.rankTotal)}`
-              : fmtInt(snap.rank),
-          winsLabel: fmtInt(wins),
-          lossesLabel: fmtInt(losses),
-          winRateLabel: fmtPct(winRate),
-          streakLabel: fmtInt(snap.streak),
-          syncedAtLabel,
-        };
-
-        setStatsState({ status: "ok", data: vm });
+        setStatsState({ status: "empty" });
+        if (!(rr as any)?.refreshed) {
+          setRefreshError((rr as any)?.reason ? `Refresh skipped: ${(rr as any).reason}` : "Refresh skipped");
+        }
       } catch (e: any) {
         if (cancelled) return;
-        setStatsState({ status: "error", message: e?.message ? String(e.message) : "Failed to load stats" });
+        setStatsState({ status: "empty" });
+        setRefreshError(e?.message ? String(e.message) : "Failed to refresh stats");
+      } finally {
+        if (!cancelled) setIsRefreshing(false);
       }
     })();
 
@@ -476,12 +532,41 @@ export default function PlayerHud({ nickname, title, tierLabel, avatarUrl, build
                     )}
 
                     {statsState.status === "loading" && (
-                      <div style={{ opacity: 0.9, lineHeight: 1.4 }}>Loading…</div>
+                      <div style={{ opacity: 0.9, lineHeight: 1.4 }}>Loading stats…</div>
+                    )}
+
+                    {statsState.status === "refreshing" && (
+                      <div style={{ opacity: 0.9, lineHeight: 1.4 }}>Refreshing stats…</div>
                     )}
 
                     {statsState.status === "empty" && (
-                      <div style={{ opacity: 0.9, lineHeight: 1.4 }}>No stats synced yet.</div>
+                      <div style={{ opacity: 0.9, lineHeight: 1.4 }}>No stats available yet.</div>
                     )}
+
+                    {refreshError ? (
+                      <div style={{ marginTop: 8, opacity: 0.75, fontSize: 12, lineHeight: 1.35, wordBreak: "break-word" }}>{refreshError}</div>
+                    ) : null}
+
+                    <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 12 }}>
+                      <button
+                        type="button"
+                        onClick={onManualRefresh}
+                        disabled={statsState.status === "idle" || isRefreshing}
+                        style={{
+                          padding: "8px 10px",
+                          borderRadius: 10,
+                          border: "1px solid rgba(202,162,77,0.9)",
+                          background: isRefreshing ? "rgba(202,162,77,0.10)" : "rgba(202,162,77,0.18)",
+                          color: "#f7f0df",
+                          fontWeight: 900,
+                          cursor: statsState.status === "idle" || isRefreshing ? "not-allowed" : "pointer",
+                          opacity: statsState.status === "idle" ? 0.5 : 1,
+                        }}
+                        title="Refresh stats"
+                      >
+                        Refresh stats
+                      </button>
+                    </div>
 
                     {statsState.status === "error" && (
                       <div style={{ opacity: 0.9, lineHeight: 1.4 }}>
