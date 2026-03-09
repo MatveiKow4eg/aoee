@@ -56,10 +56,9 @@ function mapTierToBuildingUrl(raw?: string | null): string | null {
 export default function PlayerHud({ nickname, title, tierLabel, avatarUrl, buildingUrl, online, userId, steamConnected, steamLinkUrl, onLogout, linkedPlayerName }: PlayerHudProps) {
   const [collapsed, setCollapsed] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  // Statistics (aoe2insights) removed in SteamID migration stage.
+  // Keep UI stable without upstream HTML parsing.
   const [statsOpen, setStatsOpen] = useState(false);
-  const [statsLoading, setStatsLoading] = useState(false);
-  const [statsError, setStatsError] = useState<string | null>(null);
-  const [statsData, setStatsData] = useState<any | null>(null);
 
   const name = (nickname ?? "").trim() || "Player";
   const subtitle = (title ?? "").trim();
@@ -71,30 +70,7 @@ export default function PlayerHud({ nickname, title, tierLabel, avatarUrl, build
     return mapTierToBuildingUrl((title as any)?.tierLabel ?? null) || null;
   }, [tierLabel, title]);
   const resolvedBuildingUrl = buildingUrl ?? autoBuildingUrl ?? null;
-  const [rating, setRating] = useState<number | null>(null);
-
-  useEffect(() => {
-    let aborted = false;
-    async function load() {
-      if (!userId) return;
-      try {
-        const u = encodeURIComponent(String(userId));
-        const res = await fetch(`/api/aoe2insights/statistics?userId=${u}`, { cache: "no-store" });
-        if (!res.ok) return;
-        const data: any = await res.json();
-        if (!aborted) {
-          const total = data?.matchesPlayed?.total;
-          if (typeof total === "number") setRating(total);
-        }
-      } catch (_) {
-        // ignore network errors
-      }
-    }
-    load();
-    return () => {
-      aborted = true;
-    };
-  }, [userId]);
+  // rating removed (was based on aoe2insights HTML parsing)
 
   // ==========================
   // Variant A (ACTIVE): dark wood + bronze + gold
@@ -349,19 +325,7 @@ export default function PlayerHud({ nickname, title, tierLabel, avatarUrl, build
                 <div style={{ height: 13 }} />
               )}
 
-              {/* Rating row */}
-              {rating != null && (
-                <div
-                  style={{
-                    marginTop: 4,
-                    fontSize: 14,
-                    color: "#e0cf9f",
-                    textShadow: "0 1px 0 rgba(0,0,0,0.55)",
-                  }}
-                >
-                  rating = {rating}
-                </div>
-              )}
+              {/* Rating removed (aoe2insights dependency) */}
             </div>
 
                       </div>
@@ -402,9 +366,7 @@ export default function PlayerHud({ nickname, title, tierLabel, avatarUrl, build
                       left: "50%",
                       top: "50%",
                       transform: "translate(-50%, -50%)",
-                      width: "min(720px, calc(100vw - 32px))",
-                      maxHeight: "min(80vh, calc(100vh - 32px))",
-                      overflow: "auto",
+                      width: "min(520px, calc(100vw - 32px))",
                       padding: 14,
                       borderRadius: 12,
                       border: "1px solid rgba(202,162,77,0.65)",
@@ -428,74 +390,9 @@ export default function PlayerHud({ nickname, title, tierLabel, avatarUrl, build
                       </button>
                     </div>
 
-                    {statsLoading && <div style={{ opacity: 0.9 }}>Loading...</div>}
-                    {!statsLoading && statsError && <div style={{ color: "#ffb4b4" }}>{statsError}</div>}
-
-                    {!statsLoading && !statsError && statsData && (
-                      <>
-                        <div style={{ border: "1px solid rgba(255,255,255,0.14)", borderRadius: 12, padding: 12, marginBottom: 10 }}>
-                          <div style={{ opacity: 0.75, fontSize: 12, fontWeight: 800 }}>Matches played</div>
-                          <div style={{ fontWeight: 900, fontSize: 22, marginTop: 4 }}>
-                            {statsData?.matchesPlayed?.total ?? "—"}
-                          </div>
-                          {statsData?.matchesPlayed?.mostOnText ? (
-                            <div style={{ opacity: 0.85, fontSize: 12, marginTop: 8, lineHeight: 1.3 }}>
-                              {statsData.matchesPlayed.mostOnText}
-                            </div>
-                          ) : null}
-                        </div>
-
-                        <div style={{ fontSize: 11, opacity: 0.75, marginBottom: 12 }}>
-                          Last updated: {statsData?.rawUpdatedAt ? new Date(statsData.rawUpdatedAt).toLocaleString() : "—"}
-                        </div>
-
-                        <div
-                          style={{
-                            display: "grid",
-                            gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
-                            gap: 12,
-                          }}
-                        >
-                          {([
-                            ["overallBestCiv", "Best civ"],
-                            ["overallBestMap", "Best map"],
-                            ["overallBestPosition", "Best position"],
-                          ] as const).map(([key, label]) => {
-                            const v = statsData?.[key];
-                            if (!v) return null;
-                            return (
-                              <div
-                                key={key}
-                                style={{
-                                  border: "1px solid rgba(255,255,255,0.14)",
-                                  borderRadius: 12,
-                                  padding: 12,
-                                  background: "rgba(255,255,255,0.03)",
-                                  minHeight: 92,
-                                }}
-                              >
-                                <div style={{ opacity: 0.75, fontSize: 12, fontWeight: 800 }}>{label}</div>
-                                <div style={{ display: "flex", gap: 10, marginTop: 8, alignItems: "center" }}>
-                                  {v.imageUrl ? (
-                                    // eslint-disable-next-line @next/next/no-img-element
-                                    <img src={v.imageUrl} alt={v.name || label} style={{ width: 44, height: 44, objectFit: "contain", flex: "0 0 auto" }} />
-                                  ) : (
-                                    <div style={{ width: 44, height: 44, borderRadius: 10, background: "rgba(255,255,255,0.08)" }} />
-                                  )}
-                                  <div style={{ minWidth: 0 }}>
-                                    <div style={{ fontWeight: 900, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={v.name}>
-                                      {v.name || "—"}
-                                    </div>
-                                    {v.winRateText ? <div style={{ opacity: 0.9, fontSize: 12, marginTop: 2 }}>{v.winRateText}</div> : null}
-                                    {v.matchesText ? <div style={{ opacity: 0.8, fontSize: 12 }}>{v.matchesText}</div> : null}
-                                  </div>
-                                </div>
-                              </div>
-                            );
-                          })}
-                        </div>
-                      </>
-                    )}
+                    <div style={{ opacity: 0.9, lineHeight: 1.4 }}>
+                      Statistics are temporarily disabled while migrating away from aoe2insights.
+                    </div>
                   </div>
                 </>,
                 document.body
@@ -643,31 +540,9 @@ export default function PlayerHud({ nickname, title, tierLabel, avatarUrl, build
               type="button"
               aria-label="Statistics"
               title="Statistics"
-              onClick={async (e) => {
+              onClick={(e) => {
                 e.stopPropagation();
-                if (!userId) {
-                  setStatsError("Missing userId");
-                  setStatsData(null);
-                  setStatsOpen(true);
-                  return;
-                }
-
                 setStatsOpen(true);
-                setStatsError(null);
-                setStatsLoading(true);
-
-                try {
-                  const u = encodeURIComponent(String(userId));
-                  const res = await fetch(`/api/aoe2insights/statistics?userId=${u}`, { cache: "no-store" });
-                  if (!res.ok) throw new Error(`HTTP ${res.status}`);
-                  const j = await res.json();
-                  setStatsData(j);
-                } catch (err: any) {
-                  setStatsError(err?.message ? String(err.message) : "Failed to load statistics");
-                  setStatsData(null);
-                } finally {
-                  setStatsLoading(false);
-                }
               }}
               style={{
                 cursor: "pointer",
@@ -677,6 +552,7 @@ export default function PlayerHud({ nickname, title, tierLabel, avatarUrl, build
                 display: "inline-flex",
                 alignItems: "center",
                 justifyContent: "center",
+                opacity: 0.7,
               }}
             >
               <svg

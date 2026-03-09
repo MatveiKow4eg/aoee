@@ -1,30 +1,31 @@
 import { prisma } from '../db/prisma';
-import { normalizeNickname } from './aoe2insightsService';
-import { MapService } from './mapService';
 
 export type AutoLinkResult =
-  | { ok: true; linked: true; aoeProfileId: string }
-  | { ok: true; linked: false; reason: string }
-  | { ok: false; linked: false; reason: string };
+  | { ok: true; linked: true; reason: 'linked_by_steam_id' | 'already_linked'; aoePlayerId: string }
+  | {
+      ok: true;
+      linked: false;
+      reason: 'player_not_found_for_steam_id' | 'already_claimed_by_another_user' | 'user_already_claimed_other_player';
+    }
+  | { ok: false; linked: false; reason: 'unexpected_error' };
 
 /**
- * Best-effort, fail-safe auto-linking Steam -> internal map payload (maps/default) -> AoePlayer claim.
+ * Best-effort, fail-safe auto-linking Steam -> existing AoePlayer (by steamId) -> claim.
  *
  * Strict rules:
- * - Load maps/default payload and look at payload.players
- * - Find players with exact nickname match after normalization
- * - Auto-link only if exactly one match and it has insightsUserId
- * - Claim that aoeProfileId for the current user (atomic claim)
- * - Update legacy User fields for compatibility
+ * - Find AoePlayer by steamId
+ * - If not found: return linked=false
+ * - If found but claimed by another user: linked=false
+ * - If found and already claimed by current user: linked=true (already_linked)
+ * - If found and unclaimed: atomic claim
  *
  * This MUST NOT throw and MUST NOT block Steam login.
  */
 export async function tryAutoLinkSteamToAoe(params: {
   userId: string;
   steamId: string;
-  steamNickname: string;
 }): Promise<AutoLinkResult> {
-  const { userId, steamId, steamNickname } = params;
+  const { userId, steamId } = params;
 
   const log = (event: string, extra?: Record<string, unknown>) => {
     try {
@@ -32,7 +33,6 @@ export async function tryAutoLinkSteamToAoe(params: {
       console.log(`[steam-auto-link] ${event}`, {
         userId,
         steamId,
-        steamNickname,
         ...(extra ?? {}),
       });
     } catch {
@@ -43,150 +43,64 @@ export async function tryAutoLinkSteamToAoe(params: {
   try {
     log('start');
 
-    const normalizedSteam = normalizeNickname(steamNickname);
-    if (!normalizedSteam) {
-      log('skip', { reason: 'empty_steam_nickname' });
-      return { ok: true, linked: false, reason: 'empty_steam_nickname' };
+    const safeSteamId = String(steamId || '').trim();
+    if (!safeSteamId) {
+      // should never happen, but do not throw
+      log('skip', { reason: 'empty_steam_id' });
+      return { ok: true, linked: false, reason: 'player_not_found_for_steam_id' };
     }
 
-    // Load map payload.
-    const map = new MapService();
-    const payload = await map.getMapPayload('default');
-    const players = payload?.players ?? {};
-
-    const matched = Object.values(players)
-      .map((p: any) => ({
-        name: typeof p?.name === 'string' ? p.name.trim() : '',
-        insightsUserId: typeof p?.insightsUserId === 'string' ? p.insightsUserId.trim() : '',
-      }))
-      .filter((p) => p.name && normalizeNickname(p.name) === normalizedSteam);
-
-    log('map_match', {
-      matchedPlayersCount: matched.length,
-      matchedPlayerName: matched.length === 1 ? matched[0]!.name : null,
-      matchedInsightsUserId: matched.length === 1 ? matched[0]!.insightsUserId : null,
-    });
-
-    if (matched.length === 0) {
-      log('skip', { reason: 'map_nickname_not_found' });
-      return { ok: true, linked: false, reason: 'map_nickname_not_found' };
-    }
-
-    if (matched.length > 1) {
-      log('skip', { reason: 'map_nickname_ambiguous', matchedPlayersCount: matched.length });
-      return { ok: true, linked: false, reason: 'map_nickname_ambiguous' };
-    }
-
-    const match = matched[0]!;
-    const aoeProfileId = String(match.insightsUserId || '').trim();
-    const matchedName = String(match.name || '').trim();
-
-    if (!aoeProfileId) {
-      log('skip', { reason: 'matched_player_missing_insightsUserId', matchedPlayerName: matchedName });
-      return { ok: true, linked: false, reason: 'matched_player_missing_insightsUserId' };
-    }
-
-    const aoeProfileUrl = `https://www.aoe2insights.com/user/${encodeURIComponent(aoeProfileId)}/`;
-
-    // Ensure current user didn't already claim some other profile (same semantics as manual flow).
+    // Ensure current user didn't already claim some other profile.
     const alreadyClaimed = await prisma.aoePlayer.findUnique({
       where: { claimedByUserId: userId },
-      select: { aoeProfileId: true },
+      select: { id: true, aoeProfileId: true },
     });
 
-    if (alreadyClaimed && alreadyClaimed.aoeProfileId !== aoeProfileId) {
-      log('skip', { reason: 'user_already_claimed', alreadyClaimed: alreadyClaimed.aoeProfileId, candidate: aoeProfileId });
-      return { ok: true, linked: false, reason: 'user_already_claimed' };
+    // Find existing roster/profile by steamId.
+    const player = await prisma.aoePlayer.findUnique({
+      where: { steamId: safeSteamId },
+      select: { id: true, claimedByUserId: true },
+    });
+
+    if (!player) {
+      log('not_found', { reason: 'player_not_found_for_steam_id' });
+      return { ok: true, linked: false, reason: 'player_not_found_for_steam_id' };
     }
 
-    // Steam uniqueness is enforced in Account table.
-    const existingAccountBySteam = await prisma.account.findUnique({
-      where: { provider_providerAccountId: { provider: 'steam', providerAccountId: steamId } },
-      select: { userId: true },
-    });
-
-    if (existingAccountBySteam && existingAccountBySteam.userId !== userId) {
-      log('skip', { reason: 'steam_already_linked', linkedUserId: existingAccountBySteam.userId });
-      return { ok: true, linked: false, reason: 'steam_already_linked' };
-    }
-
-    // Find or create AoePlayer row.
-    let aoePlayer = await prisma.aoePlayer.findUnique({
-      where: { aoeProfileId },
-      select: { aoeProfileId: true, claimedByUserId: true },
-    });
-
-    let createdAoePlayer = false;
-    if (!aoePlayer) {
-      try {
-        await prisma.aoePlayer.create({
-          data: {
-            aoeProfileId,
-            aoeProfileUrl,
-            nickname: matchedName,
-          },
-        });
-        createdAoePlayer = true;
-      } catch {
-        // ignore (race/unique)
-      }
-
-      aoePlayer = await prisma.aoePlayer.findUnique({
-        where: { aoeProfileId },
-        select: { aoeProfileId: true, claimedByUserId: true },
+    // If user already claimed a different player, do not auto-claim another.
+    if (alreadyClaimed && alreadyClaimed.id !== player.id) {
+      log('skip', {
+        reason: 'user_already_claimed_other_player',
+        alreadyClaimedAoePlayerId: alreadyClaimed.id,
+        candidateAoePlayerId: player.id,
       });
-
-      if (!aoePlayer) {
-        log('skip', { reason: 'aoe_player_create_failed', aoeProfileId });
-        return { ok: true, linked: false, reason: 'aoe_player_create_failed' };
-      }
+      return { ok: true, linked: false, reason: 'user_already_claimed_other_player' };
     }
 
-    log('aoe_player_ready', { aoeProfileId, createdAoePlayer, claimedByUserId: aoePlayer.claimedByUserId ?? null });
-
-    // Ensure target AoE profile is not claimed by another user.
-    if (aoePlayer.claimedByUserId && aoePlayer.claimedByUserId !== userId) {
-      log('skip', { reason: 'aoe_profile_already_claimed', aoeProfileId, claimedByUserId: aoePlayer.claimedByUserId });
-      return { ok: true, linked: false, reason: 'aoe_profile_already_claimed' };
+    if (player.claimedByUserId && player.claimedByUserId !== userId) {
+      log('skip', { reason: 'already_claimed_by_another_user', claimedByUserId: player.claimedByUserId });
+      return { ok: true, linked: false, reason: 'already_claimed_by_another_user' };
     }
 
-    // Atomic claim (same pattern as manual claim: only claim if currently unclaimed).
-    log('claim_attempt', { aoeProfileId, alreadyClaimedBy: aoePlayer.claimedByUserId ?? null });
-
-    let claimUpdatedCount = 0;
-    if (!aoePlayer.claimedByUserId) {
-      const updated = await prisma.aoePlayer.updateMany({
-        where: { aoeProfileId, claimedByUserId: null },
-        data: { claimedByUserId: userId, claimedAt: new Date() },
-      });
-      claimUpdatedCount = updated.count;
-
-      log('claim_result', { aoeProfileId, updatedCount: updated.count });
-
-      if (updated.count !== 1) {
-        log('skip', { reason: 'aoe_profile_already_claimed_race', aoeProfileId, updatedCount: updated.count });
-        return { ok: true, linked: false, reason: 'aoe_profile_already_claimed' };
-      }
-    } else {
-      log('claim_skipped_already_claimed', { aoeProfileId, claimedByUserId: aoePlayer.claimedByUserId });
+    if (player.claimedByUserId === userId) {
+      log('already_linked', { aoePlayerId: player.id });
+      return { ok: true, linked: true, reason: 'already_linked', aoePlayerId: player.id };
     }
 
-    // Update legacy User fields (compat).
-    const legacyUpdate = await prisma.user.update({
-      where: { id: userId },
-      data: {
-        aoeProfileId,
-        aoeProfileUrl,
-        aoeNickname: matchedName,
-        aoeLinkedAt: new Date(),
-      },
-      select: { id: true, aoeProfileId: true, aoeNickname: true, aoeLinkedAt: true },
+    // Atomic claim: only claim if currently unclaimed.
+    const updated = await prisma.aoePlayer.updateMany({
+      where: { id: player.id, claimedByUserId: null },
+      data: { claimedByUserId: userId, claimedAt: new Date() },
     });
 
-    log('legacy_user_updated', legacyUpdate as any);
+    if (updated.count !== 1) {
+      // race: someone else claimed
+      log('skip', { reason: 'already_claimed_by_another_user', updatedCount: updated.count });
+      return { ok: true, linked: false, reason: 'already_claimed_by_another_user' };
+    }
 
-    log('linked', { aoeProfileId, claimUpdatedCount, createdAoePlayer });
-    return { ok: true, linked: true, aoeProfileId };
+    log('linked', { aoePlayerId: player.id, reason: 'linked_by_steam_id' });
+    return { ok: true, linked: true, reason: 'linked_by_steam_id', aoePlayerId: player.id };
   } catch (e: any) {
     log('error', { reason: 'unexpected_error', message: e?.message ? String(e.message) : undefined });
     return { ok: false, linked: false, reason: 'unexpected_error' };

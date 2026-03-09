@@ -121,6 +121,8 @@ model AoePlayer {
   aoeProfileId    String    @unique @map("aoe_profile_id")
   aoeProfileUrl   String    @map("aoe_profile_url")
   nickname        String
+  // New: link existing player/profile by SteamID (filled manually by admin)
+  steamId         String?   @unique @map("steam_id")
   claimedByUserId String?   @unique @map("claimed_by_user_id")
   claimedAt       DateTime? @map("claimed_at")
   createdAt       DateTime  @default(now()) @map("created_at")

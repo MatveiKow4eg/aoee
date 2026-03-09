@@ -188,32 +188,14 @@ export const steamAuthCallback: RequestHandler = async (req, res, next) => {
       // ignore
     }
 
-    // Best-effort: strict auto-linking by Steam nickname -> AoE2 Insights -> internal DB.
+    // Best-effort: auto-link by SteamId -> existing AoePlayer (steamId-filled roster) -> claim.
     // This must never break Steam login.
     try {
-      const needsLink = !user.aoeProfileId;
-      log('auto_link_check', { needsLink, hasSteamNickname: !!steamNickname, existingAoeProfileId: user.aoeProfileId ?? null });
-
-      if (needsLink && steamNickname) {
-        log('auto_link_invoking');
-        const result = await tryAutoLinkSteamToAoe({
-          userId: user.id,
-          steamId,
-          steamNickname,
-        });
-        log('auto_link_result', result as any);
-
-        if (result.ok && result.linked) {
-          user = (await repo.findUserById(user.id)) ?? user;
-          log('user_reloaded_after_link', {
-            aoeProfileId: user.aoeProfileId ?? null,
-            aoeNickname: user.aoeNickname ?? null,
-            aoeLinkedAt: user.aoeLinkedAt ?? null,
-          });
-        }
-      } else {
-        log('auto_link_skipped_preconditions', { needsLink, steamNickname: steamNickname ?? null });
-      }
+      const result = await tryAutoLinkSteamToAoe({
+        userId: user.id,
+        steamId,
+      });
+      log('auto_link_result', result as any);
     } catch (e: any) {
       log('auto_link_failed_unexpected', { message: e?.message ? String(e.message) : undefined });
       // ignore
