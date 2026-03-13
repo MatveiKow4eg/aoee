@@ -1,8 +1,10 @@
 import type { RequestHandler } from 'express';
 import { MapService } from '../services/mapService';
+import { AoePlayerDirectorySyncService } from '../services/aoePlayerDirectorySyncService';
 import { HttpError } from '../utils/httpError';
 
 const mapService = new MapService();
+const aoeDirSync = new AoePlayerDirectorySyncService();
 
 export const getMapDefault: RequestHandler = async (_req, res, next) => {
   try {
@@ -20,7 +22,37 @@ export const putMapDefault: RequestHandler = async (req, res, next) => {
     const { payload, version } = req.body as any;
     if (!payload || typeof payload !== 'object') throw new HttpError(400, 'INVALID_PAYLOAD', 'payload must be a JSON object');
 
+    // Save map state first.
     const savedPayload = await mapService.saveMap('default', payload, typeof version === 'number' ? version : undefined);
+
+    // Best-effort: ensure AoePlayer roster records exist for any aoeProfileIds present in map payload.
+    // This keeps stats refresh working (refresh requires AoePlayer row).
+    try {
+      const players = (savedPayload as any)?.players ?? {};
+      const ids = Array.from(
+        new Set(
+          Object.values(players)
+            .map((p: any) => (p?.aoeProfileId ?? p?.insightsUserId ?? '').toString().trim())
+            .filter(Boolean)
+        )
+      );
+
+      // Keep it conservative to avoid heavy work on save.
+      const limited = ids.slice(0, 200);
+
+      void (async () => {
+        for (const id of limited) {
+          try {
+            await aoeDirSync.syncByAoeProfileId(id);
+          } catch {
+            // ignore
+          }
+        }
+      })();
+    } catch {
+      // ignore
+    }
+
     res.json({ version: 1, payload: savedPayload });
   } catch (err) {
     next(err);
@@ -67,6 +99,31 @@ export const putMapDefaultPlayers: RequestHandler = async (req, res, next) => {
     if (!players || typeof players !== 'object') throw new HttpError(400, 'INVALID_PLAYERS', 'players must be a JSON object');
 
     const savedPayload = await mapService.savePlayers('default', players);
+
+    // Best-effort: ensure roster records exist for any incoming aoeProfileIds.
+    try {
+      const ids = Array.from(
+        new Set(
+          Object.values(players)
+            .map((p: any) => (p?.aoeProfileId ?? p?.insightsUserId ?? '').toString().trim())
+            .filter(Boolean)
+        )
+      );
+
+      const limited = ids.slice(0, 200);
+      void (async () => {
+        for (const id of limited) {
+          try {
+            await aoeDirSync.syncByAoeProfileId(id);
+          } catch {
+            // ignore
+          }
+        }
+      })();
+    } catch {
+      // ignore
+    }
+
     res.json({ players: savedPayload.players });
   } catch (err) {
     next(err);

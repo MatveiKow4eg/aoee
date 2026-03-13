@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import PlayerHud from "./components/PlayerHud";
+import PlayerStatsModal from "./components/PlayerStatsModal";
 import { buildClaimedPlayerViewModel } from "../lib/map/claimedPlayerAdapter";
 import { useRouter } from "next/navigation";
 import * as PIXI from "pixi.js";
@@ -215,6 +216,9 @@ export default function Home() {
   const [meUser, setMeUser] = useState<MeResponse["user"] | null>(null);
   const nextUrl = useMemo(() => "/", []);
   const [isDetailsOpen, setIsDetailsOpen] = useState(false);
+  const [statsModalOpen, setStatsModalOpen] = useState(false);
+  const [statsModalProfileId, setStatsModalProfileId] = useState<string | null>(null);
+  const [statsModalTitle, setStatsModalTitle] = useState<string | null>(null);
 
   const openBuildingCard = useCallback((tier: TierKey) => {
     setCardTier(tier);
@@ -226,6 +230,9 @@ export default function Home() {
     setIsBuildingCardOpen(false);
     setCardTier(null);
     setIsDetailsOpen(false);
+    setStatsModalOpen(false);
+    setStatsModalProfileId(null);
+    setStatsModalTitle(null);
   }, []);
 
   const center = useCallback(() => {
@@ -861,6 +868,13 @@ export default function Home() {
         style={{ flex: 1, visibility: hasEntered ? "visible" : "hidden" }}
       />
 
+      <PlayerStatsModal
+        open={statsModalOpen}
+        aoeProfileId={statsModalProfileId}
+        title={statsModalTitle ?? undefined}
+        onClose={() => setStatsModalOpen(false)}
+      />
+
       {/* Building card modal (view-only) */}
       {isBuildingCardOpen && cardTier && (
         <div
@@ -934,6 +948,28 @@ export default function Home() {
               const playerRec = playerId ? (players as any)[playerId] : undefined;
               const avatar = avatarByPlayerId(playerId, playerRec);
 
+              // Try to resolve aoeProfileId for the player in this building.
+              // Prefer explicit aoeProfileId from playerRec, but fall back to other common shapes.
+              const buildingAoeProfileId = (
+                (playerRec as any)?.aoeProfileId ??
+                (playerRec as any)?.aoe_profile_id ??
+                (playerRec as any)?.profileId ??
+                (playerRec as any)?.profile_id ??
+                ""
+              ).toString();
+
+              // Fallback by nickname (name/alias) when no aoeProfileId is present in map payload.
+              // We keep UI available but rely on a backend endpoint to resolve nickname -> aoeProfileId.
+              const buildingNickname = (
+                (playerRec as any)?.nickname ??
+                (playerRec as any)?.name ??
+                (playerRec as any)?.alias ??
+                name ??
+                ""
+              ).toString();
+
+              const canShowStats = !!buildingAoeProfileId.trim() || !!buildingNickname.trim();
+
               return (
                 <div style={{ display: "flex", flexDirection: "column", gap: 12, alignItems: "center" }}>
                   {avatar ? (
@@ -1000,7 +1036,44 @@ export default function Home() {
                       {isDetailsOpen ? "Скрыть детали" : "Показать детали"}
                     </button>
 
-                    {/* Statistics removed (aoe2insights dependency) */}
+                    <button
+                      onClick={() => {
+                        if (!canShowStats) return;
+                        // Prefer aoeProfileId if present; fallback to nickname.
+                        const id = buildingAoeProfileId.trim();
+                        const nick = buildingNickname.trim();
+
+                        if (id) {
+                          setStatsModalProfileId(id);
+                          setStatsModalTitle(`Statistics: ${name || id}`);
+                          setStatsModalOpen(true);
+                          return;
+                        }
+
+                        // Nickname fallback requires backend resolution.
+                        window.alert("Stats by nickname is not supported yet on backend. Add backend endpoint to resolve nickname -> aoeProfileId.");
+                      }}
+                      disabled={!canShowStats}
+                      style={{
+                        padding: "10px 14px",
+                        borderRadius: 10,
+                        border: "1px solid rgba(202,162,77,0.9)",
+                        background: canShowStats ? "rgba(202,162,77,0.18)" : "rgba(255,255,255,0.06)",
+                        color: "#f7f0df",
+                        cursor: canShowStats ? "pointer" : "not-allowed",
+                        fontWeight: 900,
+                        opacity: canShowStats ? 1 : 0.55,
+                      }}
+                      title={
+                        buildingAoeProfileId.trim()
+                          ? `Statistics (${buildingAoeProfileId.trim()})`
+                          : buildingNickname.trim()
+                            ? `Statistics (nickname: ${buildingNickname.trim()})`
+                            : "No aoeProfileId/nickname in payload"
+                      }
+                    >
+                      Statistics
+                    </button>
                   </div>
 
                   

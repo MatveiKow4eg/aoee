@@ -196,18 +196,6 @@ const normalizeName = (id: string, p?: PlayerRec | null): string => {
   return raw.trim();
 };
 
-const uid = (): string => {
-  if (typeof crypto !== "undefined" && "randomUUID" in crypto) return crypto.randomUUID();
-  return `id_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`;
-};
-
-const avatarUrlFor = (name?: string): string => {
-  const n = (name ?? "").trim();
-  if (!n) return "";
-  // Placeholder: no avatar source configured
-  return "";
-};
-
 function canonicalizePlayersForEditor(players: Record<string, any> | null | undefined): Record<string, PlayerRec> {
   const src = (players ?? {}) as Record<string, any>;
   const next: Record<string, PlayerRec> = {};
@@ -250,16 +238,6 @@ export default function AdminMapPage() {
   const [debugStage, setDebugStage] = useState<string>("init");
   const [debugError, setDebugError] = useState<string | null>(null);
 
-  const tierDisplayName = useCallback(
-    (tier: TierKey) => {
-      const custom = payloadRef.current?.meta?.tierNames?.[tier];
-      const v = typeof custom === "string" ? custom.trim() : "";
-      return v || tier;
-    },
-    // meta is stored in a ref; bumping metaVersion forces React to re-render and re-read it
-    [metaVersion]
-  );
-
   // Resolve player's tier to canonical TierKey, accepting both canonical keys and custom display names from meta
   const normalizeTierKey = useCallback(
     (p?: PlayerRec | null): TierKey | "" => {
@@ -267,10 +245,8 @@ export default function AdminMapPage() {
       const rawLabel = (((p as any)?.tierLabel) ?? "").toString().trim();
       const raw = rawTier || rawLabel;
       if (!raw) return "";
-      // Direct hit by canonical key
       if ((TIERS as readonly string[]).includes(raw)) return raw as TierKey;
 
-      // Case-insensitive match against canonical keys and custom display names
       const rawLC = raw.toLocaleLowerCase("ru");
       for (const key of TIERS) {
         if (key.toLocaleLowerCase("ru") === rawLC) return key;
@@ -303,21 +279,19 @@ export default function AdminMapPage() {
   // Admin modal for assignments
   const [isAssignModalOpen, setIsAssignModalOpen] = useState(false);
   const [tierRename, setTierRename] = useState("");
-  const [renamePlayerId, setRenamePlayerId] = useState<string | null>(null);
+  const [stagedPlayers, setStagedPlayers] = useState<Record<string, PlayerRec> | null>(null);
+  const [isSavingAssignments, setIsSavingAssignments] = useState(false);
+
+  // Single-player card inside Assignments
+  const [playerCardId, setPlayerCardId] = useState<string | null>(null);
+  const [isPlayerCardOpen, setIsPlayerCardOpen] = useState(false);
+
+  // Player form fields (re-using existing editor state)
   const [renamePlayerValue, setRenamePlayerValue] = useState("");
-  const [editBioPlayerId, setEditBioPlayerId] = useState<string | null>(null);
   const [editTitleValue, setEditTitleValue] = useState("");
   const [editDescValue, setEditDescValue] = useState("");
   const [editAoeProfileIdValue, setEditAoeProfileIdValue] = useState("");
-  const [stagedPlayers, setStagedPlayers] = useState<Record<string, PlayerRec> | null>(null);
-  const [isSavingAssignments, setIsSavingAssignments] = useState(false);
-  const [selectedPlayerId, setSelectedPlayerId] = useState<string | null>(null);
   const [previewTier, setPreviewTier] = useState<TierKey | null>(null);
-  const [previewAvatar, setPreviewAvatar] = useState<string | null>(null);
-  const previewTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const previewOpenedRef = useRef(false);
-  const [isRosterOpen, setIsRosterOpen] = useState(false);
-  const [canEditTierName, setCanEditTierName] = useState(false);
 
   // Building card (show player in building)
   const [isBuildingCardOpen, setIsBuildingCardOpen] = useState(false);
@@ -334,7 +308,6 @@ export default function AdminMapPage() {
       }, AUTOSAVE_MS),
     []
   );
-
   useEffect(() => () => scheduleAutosave.cancel(), [scheduleAutosave]);
 
   useEffect(() => {
@@ -345,10 +318,8 @@ export default function AdminMapPage() {
       else viewport.plugins.resume("drag");
     }
 
-    // When Drag mode is turned OFF, clear selected building highlight
     if (!dragBuildings) {
       setSelectedBuilding(null);
-      // Force immediate visual update so no selection highlight remains
       const spritesByTier = (appRef.current as any)?.__buildingSpritesByTier as
         | Partial<Record<TierKey, PIXI.Sprite>>
         | undefined;
@@ -365,7 +336,6 @@ export default function AdminMapPage() {
   useEffect(() => {
     selectedBuildingRef.current = selectedBuilding;
 
-    // Re-apply selection highlight immediately when selection changes
     const spritesByTier = (appRef.current as any)?.__buildingSpritesByTier as
       | Partial<Record<TierKey, PIXI.Sprite>>
       | undefined;
@@ -391,7 +361,7 @@ export default function AdminMapPage() {
     if (!viewport) return;
 
     const ok = window.confirm(
-      "Внимание! Reset перезапишет карту и очистит локальные изменения. Игроки не удаляются, но действие необратимо. Продолжить?"
+      "Внимание! Reset перезапишет карту и очистит локальные и��менения. Игроки не удаляются, но действие необратимо. Продолжить?"
     );
     if (!ok) return;
 
@@ -462,18 +432,17 @@ export default function AdminMapPage() {
   const openAssignModalFor = useCallback((tier: TierKey) => {
     setSelectedBuilding(tier);
     setIsAssignModalOpen(true);
-    setSelectedPlayerId(null);
-    setRenamePlayerId(null);
+    setIsPlayerCardOpen(false);
+    setPlayerCardId(null);
+
     setRenamePlayerValue("");
-    setEditBioPlayerId(null);
     setEditTitleValue("");
     setEditDescValue("");
     setEditAoeProfileIdValue("");
+    setPreviewTier(null);
 
-    // seed staged players (canonicalize identity immediately)
     setStagedPlayers(canonicalizePlayersForEditor(payloadRef.current?.players as any));
 
-    // seed tier rename input
     const cur = payloadRef.current?.meta?.tierNames?.[tier];
     setTierRename(typeof cur === "string" && cur.trim() ? cur : tier);
   }, []);
@@ -484,89 +453,21 @@ export default function AdminMapPage() {
     openAssignModalFor(fallbackTier);
   }, [openAssignModalFor]);
 
+  const closePlayerCard = useCallback(() => {
+    setIsPlayerCardOpen(false);
+    setPlayerCardId(null);
+  }, []);
+
   const closeAssignModal = useCallback(() => {
     setIsAssignModalOpen(false);
     setStagedPlayers(null);
-    setSelectedPlayerId(null);
-    setRenamePlayerId(null);
-    setRenamePlayerValue("");
-    setEditBioPlayerId(null);
-    setEditTitleValue("");
-    setEditDescValue("");
-    setEditAoeProfileIdValue("");
-    previewOpenedRef.current = false;
-    setPreviewTier(null);
-    if (previewTimerRef.current) {
-      clearTimeout(previewTimerRef.current);
-      previewTimerRef.current = null;
-    }
-  }, []);
-
-  const openBuildingCard = useCallback((tier: TierKey) => {
-    setCardTier(tier);
-    setIsBuildingCardOpen(true);
-  }, []);
-
-  const closeBuildingCard = useCallback(() => {
-    setIsBuildingCardOpen(false);
-    setCardTier(null);
-  }, []);
-
-  const exportPlayers = useCallback(() => {
-    try {
-      const players = (payloadRef.current?.players ?? {}) as Record<string, PlayerRec>;
-      const data = JSON.stringify(players, null, 2);
-      const blob = new Blob([data], { type: "application/json" });
-      const a = document.createElement("a");
-      a.href = URL.createObjectURL(blob);
-      const ts = new Date().toISOString().replace(/[:]/g, "-").replace(/\..+$/, "");
-      a.download = `players-backup-${ts}.json`;
-      document.body.appendChild(a);
-      a.click();
-      setTimeout(() => URL.revokeObjectURL(a.href), 2000);
-      document.body.removeChild(a);
-    } catch (e) {
-      alert("Export failed: " + (e as any)?.message);
-    }
-  }, []);
-
-  const importPlayers = useCallback(async () => {
-    const input = prompt("Вставьте JSON объекта players { id: { name, tier, ... }, ... }");
-    if (!input) return;
-    try {
-      const obj = JSON.parse(input);
-      if (!obj || typeof obj !== "object" || Array.isArray(obj)) {
-        alert("Ожидается объект {id: {...}} (не массив)");
-        return;
-      }
-      const pl = payloadRef.current;
-      if (!pl) return;
-      const next = { ...pl, players: obj } as any;
-      payloadRef.current = next;
-      await saveMapState(next);
-      setMetaVersion((v) => v + 1);
-      alert("Игроки импортированы и сохранены в БД");
-    } catch (e) {
-      alert("Импорт не удался: " + (e as any)?.message);
-    }
-  }, []);
+    closePlayerCard();
+  }, [closePlayerCard]);
 
   const effectivePlayers = useMemo(
     () => canonicalizePlayersForEditor(stagedPlayers ?? (payloadRef.current?.players as any)),
     [stagedPlayers]
   );
-
-  const playersInSelected = useMemo(() => {
-    const tier = selectedBuilding;
-    if (!tier) return [] as Array<{ id: string; name: string }>;
-
-    const res = Object.entries(effectivePlayers)
-      .filter(([, p]) => normalizeTierKey(p) === tier)
-      .map(([id, p]) => ({ id, name: normalizeName(id, p) }));
-
-    res.sort((a, b) => (a.name || "").localeCompare(b.name || "", "ru"));
-    return res;
-  }, [selectedBuilding, effectivePlayers, normalizeTierKey]);
 
   const allPlayers = useMemo(() => {
     const res = Object.entries(effectivePlayers).map(([id, p]) => ({
@@ -576,20 +477,14 @@ export default function AdminMapPage() {
       title: (p?.title ?? "").toString().trim(),
     }));
 
-    // Custom order
     const TITLE_ORDER = ["Король", "Герцог", "Граф", "Барон"] as const;
-    const TIER_ORDER: TierKey[] = [
-      "Крепости",
-      "Донжоны",
-      "Башня",
-      "Халупа",
-      // variants fall under their base by prefix match below
-    ];
+    const TIER_ORDER: TierKey[] = ["Крепости", "Донжоны", "Башня", "Халупа"];
 
     const titleRank = (t?: string) => {
       const idx = TITLE_ORDER.indexOf((t ?? "") as any);
       return idx === -1 ? Number.POSITIVE_INFINITY : idx;
     };
+
     const baseTierKey = (t: TierKey | ""): string => {
       if (!t) return "zzz";
       if (t.startsWith("Крепости")) return "Крепости";
@@ -598,6 +493,7 @@ export default function AdminMapPage() {
       if (t.startsWith("Халупа")) return "Халупа";
       return t;
     };
+
     const tierRank = (t: TierKey | "") => {
       const base = baseTierKey(t) as TierKey | string;
       const idx = TIER_ORDER.indexOf(base as any);
@@ -605,103 +501,38 @@ export default function AdminMapPage() {
     };
 
     res.sort((a, b) => {
-      // 1) By title order
       const ta = titleRank(a.title);
       const tb = titleRank(b.title);
       if (ta !== tb) return ta - tb;
 
-      // 2) If no prioritized title, sort by tier group order
       const ga = tierRank(a.tier);
       const gb = tierRank(b.tier);
       if (ga !== gb) return ga - gb;
 
-      // 3) Within same group, original tier variants come before (base before v2/v3...)
       if (a.tier && b.tier) {
         const ba = baseTierKey(a.tier);
         const bb = baseTierKey(b.tier);
         if (ba === bb) return (a.tier || "").localeCompare(b.tier || "", "ru");
       }
 
-      // 4) Finally by name
       return (a.name || "").localeCompare(b.name || "", "ru");
     });
 
     return res;
   }, [effectivePlayers, normalizeTierKey]);
 
-  const rosterPlayers = useMemo(() => {
-    const src = (isAssignModalOpen ? stagedPlayers : payloadRef.current?.players) ?? {};
-    const canonical = canonicalizePlayersForEditor(src as any);
-
-    const res = Object.entries(canonical).map(([id, p]) => ({
-      id,
-      name: normalizeName(id, p),
-      tier: normalizeTierKey(p),
-      title: (p?.title ?? "").toString().trim(),
-    }));
-
-    const isKingKirill = (p: { name: string; title: string }) =>
-      p.title === "Король" && p.name.toLocaleLowerCase("ru") === "кирилл";
-
-    const TITLE_ORDER = ["Король", "Герцог", "Граф", "Барон"] as const;
-    const titleRank = (t?: string) => {
-      const idx = TITLE_ORDER.indexOf((t ?? "") as any);
-      return idx === -1 ? Number.POSITIVE_INFINITY : idx;
-    };
-
-    const tierGroup = (t: TierKey | ""): string => {
-      if (!t) return "";
-      if (t.startsWith("Крепости")) return "Крепости";
-      if (t.startsWith("Донжоны")) return "Донжоны";
-      if (t.startsWith("Башня")) return "Башни";
-      if (t.startsWith("Халупа")) return "Халупа";
-      return t;
-    };
-
-    const GROUP_ORDER = ["Крепости", "Донжоны", "Башни", "Халупа"] as const;
-    const groupRank = (t: TierKey | "") => {
-      const g = tierGroup(t);
-      const idx = (GROUP_ORDER as readonly string[]).indexOf(g);
-      return idx === -1 ? Number.POSITIVE_INFINITY : idx;
-    };
-
-    res.sort((a, b) => {
-      const ak = isKingKirill(a);
-      const bk = isKingKirill(b);
-      if (ak !== bk) return ak ? -1 : 1;
-
-      const ta = titleRank(a.title);
-      const tb = titleRank(b.title);
-      if (ta !== tb) return ta - tb;
-
-      const ga = groupRank(a.tier);
-      const gb = groupRank(b.tier);
-      if (ga !== gb) return ga - gb;
-
-      if (a.tier && b.tier) {
-        const ag = tierGroup(a.tier);
-        const bg = tierGroup(b.tier);
-        if (ag === bg) {
-          const tierCmp = (a.tier || "").localeCompare(b.tier || "", "ru");
-          if (tierCmp !== 0) return tierCmp;
-        }
-      }
-
-      return (a.name || "").localeCompare(b.name || "", "ru");
-    });
-
-    return res;
-  }, [isAssignModalOpen, stagedPlayers, isRosterOpen, normalizeTierKey]);
-
-  const movePlayer = useCallback((playerId: string, tier: TierKey | "") => {
-    setStagedPlayers((cur) => {
-      const base = canonicalizePlayersForEditor(cur ?? (payloadRef.current?.players as any));
-      const prev = (base as any)[playerId];
-      if (!prev) return base;
-      return { ...base, [playerId]: { ...prev, tier } };
-    });
-    setIsDirty(true);
-  }, []);
+  const movePlayer = useCallback(
+    (playerId: string, tier: TierKey | "") => {
+      setStagedPlayers((cur) => {
+        const base = canonicalizePlayersForEditor(cur ?? (payloadRef.current?.players as any));
+        const prev = (base as any)[playerId];
+        if (!prev) return base;
+        return { ...base, [playerId]: { ...prev, tier } };
+      });
+      setIsDirty(true);
+    },
+    []
+  );
 
   const renamePlayer = useCallback((playerId: string, nextName: string) => {
     const name = nextName.trim();
@@ -741,13 +572,31 @@ export default function AdminMapPage() {
     setIsDirty(true);
   }, []);
 
-  // НЕ удаляем игрока из БД полностью — только снимаем со строения
-  const unassignPlayer = useCallback(
+  const openPlayerCard = useCallback(
     (playerId: string) => {
-      movePlayer(playerId, "");
+      setPlayerCardId(playerId);
+      setIsPlayerCardOpen(true);
+
+      const p = (effectivePlayers as any)?.[playerId] as PlayerRec | undefined;
+      setRenamePlayerValue(normalizeName(playerId, p));
+      setEditTitleValue((p?.title ?? "").toString());
+      setEditDescValue((p?.desc ?? "").toString());
+      setEditAoeProfileIdValue((p?.aoeProfileId ?? "").toString());
+
+      const t = normalizeTierKey(p);
+      setPreviewTier((t || "") ? (t as TierKey) : null);
     },
-    [movePlayer]
+    [effectivePlayers, normalizeTierKey]
   );
+
+  const applyPlayerCardChanges = useCallback(() => {
+    if (!playerCardId) return;
+    const name = renamePlayerValue.trim();
+    if (name) renamePlayer(playerCardId, name);
+    updatePlayerBio(playerCardId, editTitleValue, editDescValue);
+    updatePlayerAoeProfileId(playerCardId, editAoeProfileIdValue);
+    closePlayerCard();
+  }, [playerCardId, renamePlayerValue, editTitleValue, editDescValue, editAoeProfileIdValue, renamePlayer, updatePlayerBio, updatePlayerAoeProfileId, closePlayerCard]);
 
   const saveAssignments = useCallback(async () => {
     const pl = payloadRef.current;
@@ -769,18 +618,10 @@ export default function AdminMapPage() {
         },
       };
 
-      // Canonicalize players and apply current bio editor inputs.
       const basePlayers: Record<string, PlayerRec> = effectivePlayers as any;
       const nextPlayers: Record<string, PlayerRec> = Object.fromEntries(
         Object.entries(basePlayers).map(([id, p]) => {
           const cloned = { ...(p as any) } as PlayerRec;
-          if (editBioPlayerId && id === editBioPlayerId) {
-            cloned.title = editTitleValue;
-            cloned.desc = editDescValue;
-            const v = editAoeProfileIdValue.trim();
-            cloned.aoeProfileId = v ? v : undefined;
-          }
-          // Producer rule: ensure we do not re-persist legacy field from the editor.
           delete (cloned as any).insightsUserId;
           return [id, cloned];
         })
@@ -826,17 +667,11 @@ export default function AdminMapPage() {
       setIsDirty(false);
       setIsAssignModalOpen(false);
       setStagedPlayers(null);
+      closePlayerCard();
     } finally {
       setIsSavingAssignments(false);
     }
-  }, [
-    effectivePlayers,
-    tierRename,
-    editBioPlayerId,
-    editTitleValue,
-    editDescValue,
-    editAoeProfileIdValue,
-  ]);
+  }, [effectivePlayers, tierRename, closePlayerCard]);
 
   useEffect(() => {
     let cancelled = false;
@@ -1005,7 +840,6 @@ export default function AdminMapPage() {
           setMetaVersion((v) => v + 1);
         }
 
-        // Sprite factory
         (appRef.current as any).__buildingSpritesByTier = {} as Partial<Record<TierKey, PIXI.Sprite>>;
 
         const setupBuildingSprite = (tier: TierKey, texture: PIXI.Texture) => {
@@ -1085,44 +919,6 @@ export default function AdminMapPage() {
           sprite.on("pointerout", onOut);
           container.on("pointerover", onOver);
           container.on("pointerout", onOut);
-
-          let tapState: { down: boolean; sx: number; sy: number; t: number; moved: boolean } = {
-            down: false,
-            sx: 0,
-            sy: 0,
-            t: 0,
-            moved: false,
-          };
-
-          const onDownTap = (e: PIXI.FederatedPointerEvent) => {
-            tapState.down = true;
-            tapState.t = typeof performance !== "undefined" ? performance.now() : Date.now();
-            tapState.sx = e.global.x;
-            tapState.sy = e.global.y;
-            tapState.moved = false;
-          };
-          const onMoveTap = (e: PIXI.FederatedPointerEvent) => {
-            if (!tapState.down) return;
-            const dx = e.global.x - tapState.sx;
-            const dy = e.global.y - tapState.sy;
-            if (dx * dx + dy * dy > 81) tapState.moved = true;
-          };
-          const onUpTap = () => {
-            if (!tapState.down) return;
-            const dt = (typeof performance !== "undefined" ? performance.now() : Date.now()) - tapState.t;
-            const isTap = !tapState.moved && dt < 350;
-            tapState.down = false;
-            if (!dragBuildingsRef.current && isTap) {
-              openBuildingCard(tier);
-            }
-          };
-          container.on("pointerdown", onDownTap);
-          container.on("pointermove", onMoveTap);
-          container.on("pointerup", onUpTap);
-          container.on("pointerupoutside", onUpTap);
-          container.on("pointercancel", () => {
-            tapState.down = false;
-          });
 
           (sprite as any).on("pointertap", () => {
             if (!dragBuildingsRef.current) return;
@@ -1226,18 +1022,6 @@ export default function AdminMapPage() {
         center();
         setDebugStage("ready");
         setIsLoading(false);
-
-        const ro = new ResizeObserver(() => {
-          if (destroyed) return;
-          if (!hostEl.isConnected) return;
-          viewport.resize(hostEl.clientWidth, hostEl.clientHeight);
-          const nextFit = Math.min(viewport.screenWidth / mapW, viewport.screenHeight / mapH);
-          viewport.clampZoom({ minScale: nextFit, maxScale: 2.2 });
-          if (viewport.scale.x < nextFit) viewport.setZoom(nextFit, true);
-        });
-        ro.observe(hostEl);
-
-        return () => ro.disconnect();
       } catch (e: any) {
         console.error("[Admin] init/load failed", e);
         if (!destroyed) {
@@ -1265,18 +1049,12 @@ export default function AdminMapPage() {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== "Escape") return;
-      previewOpenedRef.current = false;
-      setPreviewTier(null);
-      setPreviewAvatar(null);
+      closePlayerCard();
       setIsAssignModalOpen(false);
-      if (previewTimerRef.current) {
-        clearTimeout(previewTimerRef.current);
-        previewTimerRef.current = null;
-      }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, []);
+  }, [closePlayerCard]);
 
   if (!authChecked) {
     return (
@@ -1351,10 +1129,6 @@ export default function AdminMapPage() {
     );
   }
 
-  // NOTE: The rest of UI is large and unchanged (PIXI map + modal UI).
-  // For Stage 8 we only migrated the producer-side identity field from insightsUserId -> aoeProfileId.
-  // All consumer-side fallbacks remain intact.
-
   return (
     <div style={{ height: "100dvh", display: "flex", flexDirection: "column" }}>
       <div
@@ -1378,13 +1152,548 @@ export default function AdminMapPage() {
         {debugError ? ` error=${debugError}` : ""}
       </div>
 
-      {/* The PIXI host */}
       <div ref={hostRef} className="aoe-canvasHost" />
 
-      {/* Minimal note: identity editor control is preserved but now edits aoeProfileId */}
-      {/* Existing modal UI uses stagedPlayers/effectivePlayers and saveAssignments which now strip insightsUserId */}
+      {/* Admin top-left toolbar */}
+      <div
+        style={{
+          position: "fixed",
+          left: 12,
+          top: 12,
+          zIndex: 100000,
+          display: "flex",
+          gap: 8,
+          alignItems: "center",
+          background: "rgba(0,0,0,0.55)",
+          border: "1px solid rgba(255,255,255,0.15)",
+          borderRadius: 12,
+          padding: 8,
+          boxShadow: "0 6px 24px rgba(0,0,0,0.35)",
+        }}
+      >
+        <button
+          onClick={() => setDragBuildings((v) => !v)}
+          style={{
+            appearance: "none",
+            border: dragBuildings ? "1px solid #caa24d" : "1px solid rgba(255,255,255,0.25)",
+            background: dragBuildings ? "#caa24d" : "rgba(0,0,0,0.35)",
+            color: dragBuildings ? "#1b1b1b" : "rgba(255,255,255,0.9)",
+            fontWeight: 900,
+            borderRadius: 10,
+            padding: "8px 12px",
+            cursor: "pointer",
+          }}
+          title="Режим перемещения строений"
+        >
+          {dragBuildings ? "Перемещение: ��кл" : "Перемещение: Выкл"}
+        </button>
 
-      {/* Keep the rest of the UI unchanged. */}
+        <button
+          onClick={center}
+          style={{
+            appearance: "none",
+            border: "1px solid rgba(255,255,255,0.25)",
+            background: "rgba(0,0,0,0.35)",
+            color: "rgba(255,255,255,0.9)",
+            fontWeight: 800,
+            borderRadius: 10,
+            padding: "8px 12px",
+            cursor: "pointer",
+          }}
+          title="Центрировать карту"
+        >
+          Center
+        </button>
+
+        <button
+          onClick={save}
+          style={{
+            appearance: "none",
+            border: "1px solid #2bb673",
+            background: "#2bb673",
+            color: "#0b1220",
+            fontWeight: 900,
+            borderRadius: 10,
+            padding: "8px 12px",
+            cursor: "pointer",
+            opacity: isDirty ? 1 : 0.7,
+          }}
+          title="Сохранить изменения карты"
+        >
+          Save
+        </button>
+
+        <button
+          onClick={reset}
+          style={{
+            appearance: "none",
+            border: "1px solid #b62b2b",
+            background: "#b62b2b",
+            color: "#fff",
+            fontWeight: 900,
+            borderRadius: 10,
+            padding: "8px 12px",
+            cursor: "pointer",
+          }}
+          title="Сбросить позиционирование строений к значениям по умолчанию"
+        >
+          Reset
+        </button>
+      </div>
+
+      {/* Admin bottom-right controls */}
+      <div
+        style={{
+          position: "fixed",
+          right: 12,
+          bottom: 12,
+          zIndex: 100000,
+          display: "flex",
+          gap: 8,
+          alignItems: "center",
+          background: "rgba(0,0,0,0.55)",
+          border: "1px solid rgba(255,255,255,0.15)",
+          borderRadius: 12,
+          padding: 8,
+          boxShadow: "0 6px 24px rgba(0,0,0,0.35)",
+        }}
+      >
+        <button
+          onClick={openGlobalAssignments}
+          style={{
+            appearance: "none",
+            border: "1px solid #caa24d",
+            background: "#caa24d",
+            color: "#1b1b1b",
+            fontWeight: 900,
+            borderRadius: 10,
+            padding: "8px 12px",
+            cursor: "pointer",
+          }}
+          title="Открыть назначения игроков по строениям"
+        >
+          Назначения
+        </button>
+      </div>
+
+      {/* Building transform panel */}
+      {dragBuildings && selectedBuilding && (
+        <div
+          style={{
+            position: "fixed",
+            right: 12,
+            top: 72,
+            zIndex: 100001,
+            width: 320,
+            background: "rgba(0,0,0,0.7)",
+            border: "1px solid rgba(255,255,255,0.15)",
+            borderRadius: 12,
+            padding: 12,
+            color: "#f7f0df",
+          }}
+        >
+          <div style={{ fontWeight: 900, marginBottom: 8 }}>Трансформация строения</div>
+          <div style={{ display: "grid", gridTemplateColumns: "auto 1fr auto", gap: 8, alignItems: "center" }}>
+            <div style={{ opacity: 0.85 }}>Scale</div>
+            <input
+              type="range"
+              min={0.2}
+              max={3}
+              step={0.01}
+              value={buildingScale}
+              onChange={(e) => setBuildingScale(parseFloat(e.target.value))}
+            />
+            <input
+              type="number"
+              step={0.01}
+              min={0.2}
+              max={3}
+              value={buildingScale}
+              onChange={(e) => setBuildingScale(parseFloat(e.target.value || "1"))}
+              style={{
+                width: 72,
+                padding: 4,
+                borderRadius: 6,
+                background: "rgba(255,255,255,0.06)",
+                border: "1px solid rgba(255,255,255,0.2)",
+                color: "#f7f0df",
+              }}
+            />
+
+            <div style={{ opacity: 0.85 }}>Rotation (rad)</div>
+            <input
+              type="range"
+              min={-3.14}
+              max={3.14}
+              step={0.01}
+              value={buildingRotation}
+              onChange={(e) => setBuildingRotation(parseFloat(e.target.value))}
+            />
+            <input
+              type="number"
+              step={0.01}
+              min={-3.14}
+              max={3.14}
+              value={buildingRotation}
+              onChange={(e) => setBuildingRotation(parseFloat(e.target.value || "0"))}
+              style={{
+                width: 72,
+                padding: 4,
+                borderRadius: 6,
+                background: "rgba(255,255,255,0.06)",
+                border: "1px solid rgba(255,255,255,0.2)",
+                color: "#f7f0df",
+              }}
+            />
+          </div>
+        </div>
+      )}
+
+      {/* Assignments modal */}
+      {isAssignModalOpen && (
+        <div
+          onClick={closeAssignModal}
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(0,0,0,0.55)",
+            backdropFilter: "blur(2px)",
+            zIndex: 100002,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            padding: 20,
+          }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              width: "min(1200px, 100%)",
+              maxHeight: "92dvh",
+              display: "flex",
+              flexDirection: "column",
+              background: "#0f1626",
+              border: "1px solid rgba(255,255,255,0.12)",
+              borderRadius: 14,
+              padding: 16,
+              color: "#f6efe3",
+              boxShadow: "0 18px 48px rgba(0,0,0,0.55)",
+            }}
+          >
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
+                gap: 12,
+                marginBottom: 14,
+              }}
+            >
+              <div style={{ display: "flex", alignItems: "center", gap: 12, minWidth: 0 }}>
+                <div style={{ fontWeight: 900, fontSize: 20, letterSpacing: 0.2 }}>Назначения</div>
+              </div>
+              <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+                <button
+                  onClick={saveAssignments}
+                  disabled={isSavingAssignments}
+                  style={{
+                    appearance: "none",
+                    border: "1px solid #2bb673",
+                    background: "#2bb673",
+                    color: "#0b1220",
+                    fontWeight: 900,
+                    borderRadius: 10,
+                    padding: "10px 14px",
+                    cursor: "pointer",
+                  }}
+                >
+                  Сохранить
+                </button>
+                <button
+                  onClick={closeAssignModal}
+                  style={{
+                    appearance: "none",
+                    border: "1px solid rgba(255,255,255,0.25)",
+                    background: "rgba(0,0,0,0.35)",
+                    color: "rgba(255,255,255,0.95)",
+                    fontWeight: 800,
+                    borderRadius: 10,
+                    padding: "10px 14px",
+                    cursor: "pointer",
+                  }}
+                >
+                  Отмена
+                </button>
+              </div>
+            </div>
+
+            <div style={{ marginBottom: 14 }}>
+              <div style={{ opacity: 0.85, fontSize: 12, marginBottom: 6 }}>Название тира (отображение)</div>
+              <input
+                value={tierRename}
+                onChange={(e) => setTierRename(e.target.value)}
+                style={{
+                  width: "100%",
+                  padding: "10px 12px",
+                  borderRadius: 10,
+                  border: "1px solid rgba(255,255,255,0.18)",
+                  background: "rgba(255,255,255,0.05)",
+                  color: "#f6efe3",
+                  outline: "none",
+                }}
+              />
+            </div>
+
+            <div style={{ display: "flex", flexDirection: "column", gap: 10, overflow: "auto", maxHeight: "70vh", paddingRight: 6 }}>
+              {allPlayers.map((p) => (
+                <div
+                  key={p.id}
+                  onClick={() => openPlayerCard(p.id)}
+                  style={{
+                    display: "grid",
+                    gridTemplateColumns: "auto minmax(0,1fr) auto",
+                    alignItems: "center",
+                    gap: 14,
+                    padding: 12,
+                    borderRadius: 12,
+                    background: "rgba(255,255,255,0.05)",
+                    border: "1px solid rgba(255,255,255,0.1)",
+                    cursor: "pointer",
+                  }}
+                  title="Открыть карточку игрока"
+                >
+                  <div style={{ display: "flex", alignItems: "center" }}>
+                    <img
+                      src={avatarByPlayerId(p.id, (stagedPlayers ?? (payloadRef.current?.players as any))?.[p.id] as any)}
+                      alt={p.name}
+                      style={{
+                        width: 56,
+                        height: 56,
+                        borderRadius: "50%",
+                        objectFit: "cover",
+                        border: "1px solid rgba(255,255,255,0.25)",
+                      }}
+                    />
+                  </div>
+
+                  <div style={{ display: "flex", flexDirection: "column", minWidth: 0 }}>
+                    <div
+                      style={{
+                        fontWeight: 900,
+                        fontSize: 16,
+                        whiteSpace: "nowrap",
+                        textOverflow: "ellipsis",
+                        overflow: "hidden",
+                      }}
+                    >
+                      {p.name}
+                    </div>
+                    <div style={{ opacity: 0.75, fontSize: 12 }}>{p.tier || "Без строения"}</div>
+                  </div>
+
+                  <div style={{ opacity: 0.8, fontSize: 12, justifySelf: "end" }}>▶</div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Player card modal */}
+          {isPlayerCardOpen && playerCardId && (
+            <div
+              onClick={closePlayerCard}
+              style={{
+                position: "fixed",
+                inset: 0,
+                background: "rgba(0,0,0,0.55)",
+                backdropFilter: "blur(2px)",
+                zIndex: 100003,
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                padding: 20,
+              }}
+            >
+              <div
+                onClick={(e) => e.stopPropagation()}
+                style={{
+                  width: "min(760px, 100%)",
+                  maxHeight: "92dvh",
+                  overflow: "auto",
+                  background: "#0f1626",
+                  border: "1px solid rgba(255,255,255,0.12)",
+                  borderRadius: 14,
+                  padding: 16,
+                  color: "#f6efe3",
+                  boxShadow: "0 18px 48px rgba(0,0,0,0.55)",
+                }}
+              >
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, marginBottom: 14 }}>
+                  <div style={{ fontWeight: 900, fontSize: 18 }}>Карточка игрока</div>
+                  <button
+                    onClick={closePlayerCard}
+                    style={{
+                      appearance: "none",
+                      border: "1px solid rgba(255,255,255,0.25)",
+                      background: "rgba(0,0,0,0.35)",
+                      color: "rgba(255,255,255,0.95)",
+                      fontWeight: 800,
+                      borderRadius: 10,
+                      padding: "8px 12px",
+                      cursor: "pointer",
+                    }}
+                  >
+                    Закрыть
+                  </button>
+                </div>
+
+                <div style={{ display: "flex", gap: 12, alignItems: "center", marginBottom: 14 }}>
+                  <img
+                    src={avatarByPlayerId(playerCardId, (stagedPlayers ?? (payloadRef.current?.players as any))?.[playerCardId] as any)}
+                    alt={renamePlayerValue || playerCardId}
+                    style={{
+                      width: 72,
+                      height: 72,
+                      borderRadius: "50%",
+                      objectFit: "cover",
+                      border: "1px solid rgba(255,255,255,0.25)",
+                    }}
+                  />
+                  <div style={{ display: "flex", flexDirection: "column", gap: 6, minWidth: 0, flex: 1 }}>
+                    <div style={{ opacity: 0.85, fontSize: 12 }}>Имя</div>
+                    <input
+                      value={renamePlayerValue}
+                      onChange={(e) => setRenamePlayerValue(e.target.value)}
+                      placeholder="Имя игрока"
+                      style={{
+                        width: "100%",
+                        padding: "10px 12px",
+                        borderRadius: 10,
+                        border: "1px solid rgba(255,255,255,0.18)",
+                        background: "rgba(255,255,255,0.05)",
+                        color: "#f6efe3",
+                        outline: "none",
+                      }}
+                    />
+                  </div>
+                </div>
+
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 10 }}>
+                  <div>
+                    <div style={{ opacity: 0.85, fontSize: 12, marginBottom: 6 }}>Титул</div>
+                    <select
+                      value={editTitleValue}
+                      onChange={(e) => setEditTitleValue(e.target.value)}
+                      style={{
+                        width: "100%",
+                        padding: "10px 12px",
+                        borderRadius: 10,
+                        border: "1px solid rgba(255,255,255,0.18)",
+                        background: "rgba(255,255,255,0.05)",
+                        color: "#f6efe3",
+                      }}
+                    >
+                      <option value="">Без титула</option>
+                      <option value="Король">Король</option>
+                      <option value="Герцог">Герцог</option>
+                      <option value="Граф">Граф</option>
+                      <option value="Барон">Барон</option>
+                      <option value="Рыцарь">Рыцарь</option>
+                      <option value="Воевода">Воевода</option>
+                      <option value="Маршал">Маршал</option>
+                      <option value="Баронет">Баронет</option>
+                      <option value="Лорд">Лорд</option>
+                      <option value="Сквайр">Сквайр</option>
+                    </select>
+                  </div>
+                  <div>
+                    <div style={{ opacity: 0.85, fontSize: 12, marginBottom: 6 }}>aoeProfileId</div>
+                    <input
+                      value={editAoeProfileIdValue}
+                      onChange={(e) => setEditAoeProfileIdValue(e.target.value)}
+                      placeholder="aoeProfileId"
+                      style={{
+                        width: "100%",
+                        padding: "10px 12px",
+                        borderRadius: 10,
+                        border: "1px solid rgba(255,255,255,0.18)",
+                        background: "rgba(255,255,255,0.05)",
+                        color: "#f6efe3",
+                      }}
+                    />
+                  </div>
+                </div>
+
+                <div style={{ marginBottom: 10 }}>
+                  <div style={{ opacity: 0.85, fontSize: 12, marginBottom: 6 }}>Описание</div>
+                  <textarea
+                    value={editDescValue}
+                    onChange={(e) => setEditDescValue(e.target.value)}
+                    placeholder="Описание"
+                    rows={5}
+                    style={{
+                      width: "100%",
+                      padding: "10px 12px",
+                      borderRadius: 10,
+                      border: "1px solid rgba(255,255,255,0.18)",
+                      background: "rgba(255,255,255,0.05)",
+                      color: "#f6efe3",
+                    }}
+                  />
+                </div>
+
+                <div style={{ marginBottom: 14 }}>
+                  <div style={{ opacity: 0.85, fontSize: 12, marginBottom: 6 }}>Строение</div>
+                  <select
+                    value={(previewTier ?? "") as any}
+                    onChange={(e) => {
+                      const next = (e.target.value || "") as any;
+                      setPreviewTier((next || null) as any);
+                      movePlayer(playerCardId, next as any);
+                    }}
+                    style={{
+                      width: "100%",
+                      padding: "10px 12px",
+                      borderRadius: 10,
+                      border: "1px solid rgba(255,255,255,0.18)",
+                      background: "rgba(255,255,255,0.05)",
+                      color: "#f6efe3",
+                    }}
+                  >
+                    <option value="">Без строения</option>
+                    {TIERS.map((t) => (
+                      <option key={t} value={t}>
+                        {t}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+                  <button
+                    onClick={applyPlayerCardChanges}
+                    style={{
+                      appearance: "none",
+                      border: "1px solid #2bb673",
+                      background: "#2bb673",
+                      color: "#0b1220",
+                      fontWeight: 900,
+                      borderRadius: 10,
+                      padding: "10px 14px",
+                      cursor: "pointer",
+                    }}
+                  >
+                    Применить (локально)
+                  </button>
+                </div>
+
+                <div style={{ opacity: 0.65, fontSize: 12, marginTop: 12 }}>
+                  Изменения применяются к локальному состоянию. Чтобы записать в БД — нажмите «Сохранить» в окне «Назначения».
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }
