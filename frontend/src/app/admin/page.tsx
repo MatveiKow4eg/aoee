@@ -54,6 +54,12 @@ type PlayerRec = {
   aoeProfileId?: string;
 
   /**
+   * Optional helper for backend stats sync.
+   * If provided, backend can sync stats via World’s Edge profile_name = /steam/<steamId>.
+   */
+  steamId?: string;
+
+  /**
    * @deprecated legacy field; may exist in old stored payloads.
    * Admin/editor must NOT produce it on save.
    */
@@ -291,6 +297,7 @@ export default function AdminMapPage() {
   const [editTitleValue, setEditTitleValue] = useState("");
   const [editDescValue, setEditDescValue] = useState("");
   const [editAoeProfileIdValue, setEditAoeProfileIdValue] = useState("");
+  const [editSteamIdValue, setEditSteamIdValue] = useState("");
   const [previewTier, setPreviewTier] = useState<TierKey | null>(null);
 
   // Building card (show player in building)
@@ -572,6 +579,19 @@ export default function AdminMapPage() {
     setIsDirty(true);
   }, []);
 
+  const updatePlayerSteamId = useCallback((playerId: string, nextSteamId: string) => {
+    setStagedPlayers((cur) => {
+      const base = canonicalizePlayersForEditor(cur ?? (payloadRef.current?.players as any));
+      const prev = (base as any)[playerId];
+      if (!prev) return base;
+      const v = nextSteamId.trim();
+      const steamId = v ? v : undefined;
+      return { ...base, [playerId]: { ...prev, ...(steamId ? { steamId } : {}) } };
+    });
+
+    setIsDirty(true);
+  }, []);
+
   const openPlayerCard = useCallback(
     (playerId: string) => {
       setPlayerCardId(playerId);
@@ -582,6 +602,7 @@ export default function AdminMapPage() {
       setEditTitleValue((p?.title ?? "").toString());
       setEditDescValue((p?.desc ?? "").toString());
       setEditAoeProfileIdValue((p?.aoeProfileId ?? "").toString());
+      setEditSteamIdValue((p as any)?.steamId ? String((p as any).steamId) : "");
 
       const t = normalizeTierKey(p);
       setPreviewTier((t || "") ? (t as TierKey) : null);
@@ -595,8 +616,9 @@ export default function AdminMapPage() {
     if (name) renamePlayer(playerCardId, name);
     updatePlayerBio(playerCardId, editTitleValue, editDescValue);
     updatePlayerAoeProfileId(playerCardId, editAoeProfileIdValue);
+    updatePlayerSteamId(playerCardId, editSteamIdValue);
     closePlayerCard();
-  }, [playerCardId, renamePlayerValue, editTitleValue, editDescValue, editAoeProfileIdValue, renamePlayer, updatePlayerBio, updatePlayerAoeProfileId, closePlayerCard]);
+  }, [playerCardId, renamePlayerValue, editTitleValue, editDescValue, editAoeProfileIdValue, editSteamIdValue, renamePlayer, updatePlayerBio, updatePlayerAoeProfileId, updatePlayerSteamId, closePlayerCard]);
 
   const saveAssignments = useCallback(async () => {
     const pl = payloadRef.current;
@@ -1620,6 +1642,26 @@ export default function AdminMapPage() {
                         color: "#f6efe3",
                       }}
                     />
+                  </div>
+                </div>
+
+                <div style={{ marginBottom: 10 }}>
+                  <div style={{ opacity: 0.85, fontSize: 12, marginBottom: 6 }}>Steam ID (опционально)</div>
+                  <input
+                    value={editSteamIdValue}
+                    onChange={(e) => setEditSteamIdValue(e.target.value)}
+                    placeholder="7656119..."
+                    style={{
+                      width: "100%",
+                      padding: "10px 12px",
+                      borderRadius: 10,
+                      border: "1px solid rgba(255,255,255,0.18)",
+                      background: "rgba(255,255,255,0.05)",
+                      color: "#f6efe3",
+                    }}
+                  />
+                  <div style={{ marginTop: 6, opacity: 0.65, fontSize: 12, lineHeight: 1.35 }}>
+                    Если указан Steam ID, сервер сможет синкать статистику через профиль <code>/steam/&lt;id&gt;</code>.
                   </div>
                 </div>
 

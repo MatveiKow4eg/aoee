@@ -1,4 +1,5 @@
 import type { RequestHandler } from 'express';
+import { prisma } from '../db/prisma';
 import { MapService } from '../services/mapService';
 import { AoePlayerDirectorySyncService } from '../services/aoePlayerDirectorySyncService';
 import { HttpError } from '../utils/httpError';
@@ -6,9 +7,51 @@ import { HttpError } from '../utils/httpError';
 const mapService = new MapService();
 const aoeDirSync = new AoePlayerDirectorySyncService();
 
+const mergeSteamIdsIntoMapPlayers = async (players: Record<string, any> | null | undefined) => {
+  const src = (players ?? {}) as Record<string, any>;
+  const items = Object.entries(src).map(([playerKey, p]) => {
+    const aoeProfileId = (p?.aoeProfileId ?? p?.insightsUserId ?? '').toString().trim();
+    const steamId = (p?.steamId ?? '').toString().trim();
+    return { playerKey, aoeProfileId, steamId };
+  });
+
+  const missing = items.filter((it) => it.aoeProfileId && !it.steamId);
+  if (missing.length === 0) return src;
+
+  const aoeProfileIds = Array.from(new Set(missing.map((m) => m.aoeProfileId)));
+  if (aoeProfileIds.length === 0) return src;
+
+  const rows = await prisma.aoePlayer.findMany({
+    where: { aoeProfileId: { in: aoeProfileIds } },
+    select: { aoeProfileId: true, steamId: true },
+  });
+  const steamByProfileId = new Map(rows.filter((r) => r.steamId).map((r) => [r.aoeProfileId, r.steamId!]));
+
+  if (steamByProfileId.size === 0) return src;
+
+  const next: Record<string, any> = { ...src };
+  for (const it of missing) {
+    const sid = steamByProfileId.get(it.aoeProfileId);
+    if (!sid) continue;
+    const cur = next[it.playerKey] ?? {};
+    next[it.playerKey] = { ...cur, steamId: sid };
+  }
+
+  return next;
+};
+
 export const getMapDefault: RequestHandler = async (_req, res, next) => {
   try {
     const payload = await mapService.getMapPayload('default');
+
+    // Best-effort: enrich map payload with known steamId values from the AoePlayer roster.
+    // This lets admin UI "подсасывать" steamId without manually re-entering it.
+    try {
+      (payload as any).players = await mergeSteamIdsIntoMapPlayers((payload as any).players);
+    } catch {
+      // ignore
+    }
+
     res.json({ version: 1, payload });
   } catch (err) {
     next(err);
@@ -85,7 +128,15 @@ export const putMapDefaultBuildings: RequestHandler = async (req, res, next) => 
 export const getMapDefaultPlayers: RequestHandler = async (_req, res, next) => {
   try {
     const payload = await mapService.getMapPayload('default');
-    res.json({ players: payload.players });
+
+    // Best-effort: enrich map payload with known steamId values from the AoePlayer roster.
+    try {
+      (payload as any).players = await mergeSteamIdsIntoMapPlayers((payload as any).players);
+    } catch {
+      // ignore
+    }
+
+    res.json({ players: (payload as any).players });
   } catch (err) {
     next(err);
   }
