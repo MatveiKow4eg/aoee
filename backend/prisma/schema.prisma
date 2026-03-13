@@ -66,19 +66,28 @@ model MapPlayer {
 }
 
 model User {
-  id               String     @id @default(cuid())
-  email            String?    @unique
-  displayName      String?    @map("display_name")
-  passwordHash     String?    @map("password_hash")
-  role             String     @default("USER")
-  isActive         Boolean    @default(true) @map("is_active")
-  createdAt        DateTime   @default(now()) @map("created_at")
-  updatedAt        DateTime   @updatedAt @map("updated_at")
-  accounts         Account[]
-  aoePlayerClaimed AoePlayer? @relation("AoePlayerClaim")
-  sessions         Session[]
+  id                    String     @id @default(cuid())
+  email                 String?    @unique
+  displayName           String?    @map("display_name")
+  passwordHash          String?    @map("password_hash")
+  role                  String     @default("USER")
+  isActive              Boolean    @default(true) @map("is_active")
+  createdAt             DateTime   @default(now()) @map("created_at")
+  updatedAt             DateTime   @updatedAt @map("updated_at")
+
+  // Challenge cooldown applies ONLY to the challenger and starts AFTER resolution/expiry.
+  challengeCooldownUntil DateTime? @map("challenge_cooldown_until")
+
+  accounts              Account[]
+  aoePlayerClaimed      AoePlayer? @relation("AoePlayerClaim")
+  sessions              Session[]
+
+  challengesAsChallenger UserChallenge[] @relation("ChallengeChallenger")
+  challengesAsTarget     UserChallenge[] @relation("ChallengeTarget")
+  challengesResolved     UserChallenge[] @relation("ChallengeResolvedBy")
 
   @@index([email])
+  @@index([challengeCooldownUntil])
   @@map("users")
 }
 
@@ -128,6 +137,52 @@ model AoePlayer {
 
   @@index([claimedByUserId])
   @@map("aoe_players")
+}
+
+enum ChallengeStatus {
+  ACTIVE
+  COMPLETED
+  EXPIRED
+  CANCELLED
+}
+
+enum ChallengeResult {
+  CHALLENGER_WON
+  CHALLENGER_LOST
+  DRAW
+  NO_SHOW
+}
+
+model UserChallenge {
+  id               String          @id @default(cuid())
+
+  challengerUserId String          @map("challenger_user_id")
+  targetUserId     String          @map("target_user_id")
+
+  status           ChallengeStatus @default(ACTIVE)
+  result           ChallengeResult?
+
+  createdAt        DateTime        @default(now()) @map("created_at")
+  acceptedAt       DateTime        @map("accepted_at")
+  expiresAt        DateTime        @map("expires_at")
+
+  resolvedAt       DateTime?       @map("resolved_at")
+  resolvedByUserId String?         @map("resolved_by_user_id")
+
+  winnerUserId     String?         @map("winner_user_id")
+  loserUserId      String?         @map("loser_user_id")
+
+  notes            String?
+
+  challengerUser   User            @relation("ChallengeChallenger", fields: [challengerUserId], references: [id], onDelete: Restrict)
+  targetUser       User            @relation("ChallengeTarget", fields: [targetUserId], references: [id], onDelete: Restrict)
+  resolvedByUser   User?           @relation("ChallengeResolvedBy", fields: [resolvedByUserId], references: [id], onDelete: SetNull)
+
+  @@index([challengerUserId])
+  @@index([targetUserId])
+  @@index([status])
+  @@index([expiresAt])
+  @@map("user_challenges")
 }
 
 model AoePlayerStatSnapshot {

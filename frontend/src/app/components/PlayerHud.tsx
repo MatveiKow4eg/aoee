@@ -19,6 +19,15 @@ export type PlayerHudProps = {
 
   /** Canonical claimed AoE profile id (AoePlayer.aoeProfileId). Used to fetch cached stats from backend. */
   aoeProfileId?: string | null;
+
+  /** Called when user performs a search by nickname (free text). */
+  onSearchNicknames?: (query: string) => void;
+
+  /** List of all nicknames available on the map (for suggestions). */
+  nicknameOptions?: string[];
+
+  /** Called when building-group filters change. Groups: Замки/Крепости/Донжоны/Башня/Халупа */
+  onFilterGroupsChange?: (active: Record<string, boolean>) => void;
 };
 
 function mapTierToBuildingUrl(raw?: string | null): string | null {
@@ -55,10 +64,48 @@ function mapTierToBuildingUrl(raw?: string | null): string | null {
   return map[key] ?? null;
 }
 
-export default function PlayerHud({ nickname, title, tierLabel, avatarUrl, buildingUrl, online, steamConnected, steamLinkUrl, onLogout, linkedPlayerName, aoeProfileId }: PlayerHudProps) {
+export default function PlayerHud({ nickname, title, tierLabel, avatarUrl, buildingUrl, online, steamConnected, steamLinkUrl, onLogout, linkedPlayerName, aoeProfileId, onSearchNicknames, onFilterGroupsChange, nicknameOptions }: PlayerHudProps) {
   const [collapsed, setCollapsed] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [statsOpen, setStatsOpen] = useState(false);
+
+  // Tools panel (search/filter/history)
+  const [toolsOpen, setToolsOpen] = useState<{ search: boolean; filter: boolean; history: boolean }>({
+    search: false,
+    filter: false,
+    history: false,
+  });
+  const [searchQuery, setSearchQuery] = useState("");
+  const [filterGroups, setFilterGroups] = useState<Record<string, boolean>>({
+    "Замки": true,
+    "Крепости": true,
+    "Донжоны": true,
+    "Башня": true,
+    "Халупа": true,
+  });
+  const [historyList, setHistoryList] = useState<string[]>([]);
+
+  const searchSuggestions = useMemo(() => {
+    const q = (searchQuery ?? "").toString().trim().toLocaleLowerCase("ru");
+    const opts = (nicknameOptions ?? []).map((x) => (x ?? "").toString().trim()).filter(Boolean);
+    if (!q) return [] as { label: string; exact: boolean }[];
+
+    const scored = opts
+      .map((label) => {
+        const lc = label.toLocaleLowerCase("ru");
+        const exact = lc === q;
+        const starts = lc.startsWith(q);
+        const includes = lc.includes(q);
+        const score = exact ? 1000 : starts ? 500 : includes ? 100 : 0;
+        return { label, exact, starts, includes, score };
+      })
+      .filter((x) => x.score > 0)
+      .sort((a, b) => b.score - a.score || a.label.localeCompare(b.label, "ru"))
+      .slice(0, 8)
+      .map(({ label, exact }) => ({ label, exact }));
+
+    return scored;
+  }, [searchQuery, nicknameOptions]);
 
   const [statsState, setStatsState] = useState<
     | { status: "idle" }
@@ -268,28 +315,461 @@ export default function PlayerHud({ nickname, title, tierLabel, avatarUrl, build
   }, [statsOpen, aoeProfileId]);
 
   return (
-    <div
-      className="hud-root"
-      style={{
-        position: "fixed",
-        bottom: 14,
-        left: 12,
-        zIndex: 100000,
-        pointerEvents: "none", // do not block map interactions
-      }}
-    >
+    <>
+      {/* Tools panel is rendered into <body> so it's not inside hud-root */}
+      {typeof document !== "undefined" &&
+        createPortal(
+          <div
+            className="hud-tools"
+            style={{
+              position: "fixed",
+              top: 12,
+              right: 12,
+              zIndex: 100002,
+              display: "flex",
+              flexDirection: "row",
+              alignItems: "center",
+              gap: 8,
+              pointerEvents: "auto",
+            }}
+          >
+            <button
+              type="button"
+              aria-label="Search"
+              title="Поиск"
+              onClick={(e) => {
+                e.stopPropagation();
+                setToolsOpen((s) => ({ ...s, search: !s.search, filter: false, history: false }));
+              }}
+              style={{
+                cursor: "pointer",
+                background: "#caa24d",
+                border: "1px solid #caa24d",
+                color: "#1b1b1b",
+                borderRadius: 10,
+                padding: "6px 8px",
+                display: "inline-flex",
+                alignItems: "center",
+                justifyContent: "center",
+                gap: 6,
+              }}
+            >
+              <svg
+                width="16"
+                height="16"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="#1b1b1b"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <circle cx="11" cy="11" r="8"></circle>
+                <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+              </svg>
+              <span style={{ fontWeight: 900, fontSize: 12 }}>Поиск</span>
+            </button>
+
+            <button
+              type="button"
+              aria-label="Filter"
+              title="Фильтр"
+              onClick={(e) => {
+                e.stopPropagation();
+                setToolsOpen((s) => ({ ...s, filter: !s.filter, search: false, history: false }));
+              }}
+              style={{
+                cursor: "pointer",
+                background: "#caa24d",
+                border: "1px solid #caa24d",
+                color: "#1b1b1b",
+                borderRadius: 10,
+                padding: "6px 8px",
+                display: "inline-flex",
+                alignItems: "center",
+                justifyContent: "center",
+                gap: 6,
+              }}
+            >
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="#1b1b1b" xmlns="http://www.w3.org/2000/svg">
+                <path d="M3 5h18l-7 8v4l-4 2v-6L3 5z" />
+              </svg>
+              <span style={{ fontWeight: 900, fontSize: 12 }}>Фильтр</span>
+            </button>
+
+            <button
+              type="button"
+              aria-label="History"
+              title="История"
+              onClick={(e) => {
+                e.stopPropagation();
+                setToolsOpen((s) => ({ ...s, history: !s.history, search: false, filter: false }));
+              }}
+              style={{
+                cursor: "pointer",
+                background: "#caa24d",
+                border: "1px solid #caa24d",
+                color: "#1b1b1b",
+                borderRadius: 10,
+                padding: "6px 8px",
+                display: "inline-flex",
+                alignItems: "center",
+                justifyContent: "center",
+                gap: 6,
+              }}
+            >
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="#1b1b1b" xmlns="http://www.w3.org/2000/svg">
+                <path d="M13 3a9 9 0 1 0 8 8h-2a7 7 0 1 1-7-7V3z" />
+                <path d="M12 7h1v6h-4v-1h3V7z" />
+              </svg>
+              <span style={{ fontWeight: 900, fontSize: 12 }}>История</span>
+            </button>
+
+            {toolsOpen.search && (
+              <div
+                onPointerDown={(e) => e.stopPropagation()}
+                style={{
+                  position: "absolute",
+                  right: "calc(100% + 8px)",
+                  top: 0,
+                  width: 260,
+                  padding: 10,
+                  borderRadius: 12,
+                  border: "1px solid rgba(202,162,77,0.55)",
+                  background: "rgba(20,14,10,0.96)",
+                  boxShadow: "0 18px 44px rgba(0,0,0,0.70)",
+                  color: "#f7f0df",
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: 8,
+                }}
+              >
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+                  <div style={{ fontWeight: 900, fontSize: 12, letterSpacing: 0.6, textTransform: "uppercase", opacity: 0.92 }}>Поиск</div>
+                  <button
+                    type="button"
+                    onClick={() => setToolsOpen((s) => ({ ...s, search: false }))}
+                    style={{ background: "transparent", border: 0, color: "rgba(247,240,223,0.9)", cursor: "pointer", fontSize: 16, lineHeight: 1 }}
+                    aria-label="Close"
+                    title="Close"
+                  >
+                    ×
+                  </button>
+                </div>
+                <div style={{ position: "relative" }}>
+                  <input
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    placeholder="Имя игрока…"
+                    style={{
+                      width: "100%",
+                      padding: "8px 34px 8px 10px",
+                      borderRadius: 10,
+                      border: "1px solid rgba(255,255,255,0.22)",
+                      background: "rgba(255,255,255,0.06)",
+                      color: "#f7f0df",
+                      outline: "none",
+                    }}
+                  />
+                  {searchQuery.trim() && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSearchQuery("");
+                        onSearchNicknames?.("");
+                      }}
+                      title="Очистить поиск"
+                      aria-label="Очистить поиск"
+                      style={{
+                        position: "absolute",
+                        right: 8,
+                        top: "50%",
+                        transform: "translateY(-50%)",
+                        width: 22,
+                        height: 22,
+                        borderRadius: 8,
+                        border: "1px solid rgba(255,255,255,0.18)",
+                        background: "rgba(255,255,255,0.06)",
+                        color: "rgba(247,240,223,0.92)",
+                        cursor: "pointer",
+                        display: "grid",
+                        placeItems: "center",
+                        padding: 0,
+                        lineHeight: 1,
+                        fontWeight: 900,
+                      }}
+                    >
+                      ×
+                    </button>
+                  )}
+                </div>
+                {searchSuggestions.length > 0 && (
+                  <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                    <div style={{ fontWeight: 900, fontSize: 11, opacity: 0.75, letterSpacing: 0.4, textTransform: "uppercase" }}>
+                      Подсказки
+                    </div>
+                    {searchSuggestions.map((sug) => (
+                      <button
+                        key={sug.label}
+                        type="button"
+                        onClick={() => {
+                          setSearchQuery(sug.label);
+                          setHistoryList((h) => [sug.label, ...h].slice(0, 10));
+                          onSearchNicknames?.(sug.label);
+                          setToolsOpen((st) => ({ ...st, search: false }));
+                        }}
+                        style={{
+                          width: "100%",
+                          textAlign: "left",
+                          padding: "8px 10px",
+                          borderRadius: 10,
+                          border: sug.exact ? "1px solid rgba(43,187,115,0.85)" : "1px solid rgba(255,255,255,0.14)",
+                          background: sug.exact ? "rgba(43,187,115,0.12)" : "rgba(255,255,255,0.06)",
+                          color: "#f7f0df",
+                          cursor: "pointer",
+                          fontWeight: 800,
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "space-between",
+                          gap: 10,
+                        }}
+                        title={sug.exact ? "Точное совпадение" : "Похожий ник"}
+                      >
+                        <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{sug.label}</span>
+                        {sug.exact ? (
+                          <span style={{ fontSize: 11, fontWeight: 900, color: "#2bb673" }}>EXACT</span>
+                        ) : (
+                          <span style={{ fontSize: 11, opacity: 0.7 }}>match</span>
+                        )}
+                      </button>
+                    ))}
+                  </div>
+                )}
+
+                <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const q = searchQuery.trim();
+                      if (q) {
+                        setHistoryList((h) => [q, ...h].slice(0, 10));
+                        onSearchNicknames?.(q);
+                      }
+                      setToolsOpen((s) => ({ ...s, search: false }));
+                    }}
+                    style={{
+                      padding: "8px 10px",
+                      borderRadius: 10,
+                      border: "1px solid #caa24d",
+                      background: "#caa24d",
+                      color: "#1b1b1b",
+                      fontWeight: 900,
+                      cursor: "pointer",
+                    }}
+                  >
+                    Найти
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {toolsOpen.filter && (
+              <div
+                onPointerDown={(e) => e.stopPropagation()}
+                style={{
+                  position: "absolute",
+                  right: "calc(100% + 8px)",
+                  top: 0,
+                  width: 220,
+                  padding: 10,
+                  borderRadius: 12,
+                  border: "1px solid rgba(202,162,77,0.55)",
+                  background: "rgba(20,14,10,0.96)",
+                  boxShadow: "0 18px 44px rgba(0,0,0,0.70)",
+                  color: "#f7f0df",
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: 8,
+                }}
+              >
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+                  <div style={{ fontWeight: 900, fontSize: 12, letterSpacing: 0.6, textTransform: "uppercase", opacity: 0.92 }}>Фильтр</div>
+                  <button
+                    type="button"
+                    onClick={() => setToolsOpen((s) => ({ ...s, filter: false }))}
+                    style={{ background: "transparent", border: 0, color: "rgba(247,240,223,0.9)", cursor: "pointer", fontSize: 16, lineHeight: 1 }}
+                    aria-label="Close"
+                    title="Close"
+                  >
+                    ×
+                  </button>
+                </div>
+                <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                  {Object.keys(filterGroups).map((k) => {
+                    const checked = !!filterGroups[k];
+                    return (
+                      <label key={k} style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", userSelect: "none" }}>
+                        <input
+                          type="checkbox"
+                          checked={checked}
+                          onChange={() => {
+                            setFilterGroups((prev) => {
+                              const next = { ...prev, [k]: !prev[k] };
+                              onFilterGroupsChange?.(next);
+                              return next;
+                            });
+                          }}
+                          style={{ width: 16, height: 16, cursor: "pointer" }}
+                        />
+                        <span style={{ fontWeight: 900, fontSize: 13 }}>{k}</span>
+                      </label>
+                    );
+                  })}
+                </div>
+                <div style={{ display: "flex", justifyContent: "space-between", gap: 8, marginTop: 8 }}>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const next = {
+                        "Замки": true,
+                        "Крепости": true,
+                        "Донжоны": true,
+                        "Башня": true,
+                        "Халупа": true,
+                      };
+                      setFilterGroups(next);
+                      onFilterGroupsChange?.(next);
+                    }}
+                    style={{
+                      padding: "8px 10px",
+                      borderRadius: 10,
+                      border: "1px solid rgba(255,255,255,0.22)",
+                      background: "rgba(255,255,255,0.06)",
+                      color: "#f7f0df",
+                      fontWeight: 900,
+                      cursor: "pointer",
+                    }}
+                    title="Сбросить фильтр"
+                  >
+                    Сбросить
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      onFilterGroupsChange?.(filterGroups);
+                      setToolsOpen((s) => ({ ...s, filter: false }));
+                    }}
+                    style={{
+                      padding: "8px 10px",
+                      borderRadius: 10,
+                      border: "1px solid #caa24d",
+                      background: "#caa24d",
+                      color: "#1b1b1b",
+                      fontWeight: 900,
+                      cursor: "pointer",
+                    }}
+                  >
+                    Закрыть
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {toolsOpen.history && (
+              <div
+                onPointerDown={(e) => e.stopPropagation()}
+                style={{
+                  position: "absolute",
+                  right: "calc(100% + 8px)",
+                  top: 0,
+                  width: 280,
+                  maxHeight: 220,
+                  overflow: "auto",
+                  padding: 10,
+                  borderRadius: 12,
+                  border: "1px solid rgba(202,162,77,0.55)",
+                  background: "rgba(20,14,10,0.96)",
+                  boxShadow: "0 18px 44px rgba(0,0,0,0.70)",
+                  color: "#f7f0df",
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: 8,
+                }}
+              >
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+                  <div style={{ fontWeight: 900, fontSize: 12, letterSpacing: 0.6, textTransform: "uppercase", opacity: 0.92 }}>История</div>
+                  <button
+                    type="button"
+                    onClick={() => setToolsOpen((s) => ({ ...s, history: false }))}
+                    style={{ background: "transparent", border: 0, color: "rgba(247,240,223,0.9)", cursor: "pointer", fontSize: 16, lineHeight: 1 }}
+                    aria-label="Close"
+                    title="Close"
+                  >
+                    ×
+                  </button>
+                </div>
+                {historyList.length === 0 ? (
+                  <div style={{ opacity: 0.8, fontSize: 12 }}>Пусто</div>
+                ) : (
+                  <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                    {historyList.map((h, i) => (
+                      <div
+                        key={`${h}-${i}`}
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "space-between",
+                          gap: 8,
+                          padding: 6,
+                          borderRadius: 8,
+                          background: "rgba(255,255,255,0.06)",
+                          border: "1px solid rgba(255,255,255,0.10)",
+                        }}
+                      >
+                        <div style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{h}</div>
+                        <button
+                          type="button"
+                          onClick={() => setHistoryList((list) => list.filter((_, idx) => idx !== i))}
+                          title="Удалить"
+                          aria-label="Удалить"
+                          style={{ background: "transparent", border: 0, color: "rgba(247,240,223,0.9)", cursor: "pointer", fontSize: 14 }}
+                        >
+                          ✕
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>,
+          document.body
+        )}
+
       <div
-        className="hud-wrap"
+        className="hud-root"
         style={{
-          width: W,
-          transform: `translateX(${shiftX}px)`,
-          transition: "transform 220ms ease",
-          willChange: "transform",
-          pointerEvents: "auto", // allow clicking on toggle/panel
-          display: "flex",
-          justifyContent: "flex-start",
+          position: "fixed",
+          bottom: 14,
+          left: 12,
+          zIndex: 100000,
+          pointerEvents: "none", // do not block map interactions
         }}
       >
+        <div
+          className="hud-wrap"
+          style={{
+            width: W,
+            transform: `translateX(${shiftX}px)`,
+            transition: "transform 220ms ease",
+            willChange: "transform",
+            pointerEvents: "auto", // allow clicking on toggle/panel
+            display: "flex",
+            justifyContent: "flex-start",
+            position: "relative",
+          }}
+        >
         {/* Main panel */}
         <div
           className="hud-card"
@@ -827,7 +1307,9 @@ export default function PlayerHud({ nickname, title, tierLabel, avatarUrl, build
             {collapsed ? "▶" : "◀"}
           </span>
         </button>
-      </div>
+
+              </div>
     </div>
+    </>
   );
 }

@@ -220,6 +220,16 @@ export default function Home() {
   const [statsModalProfileId, setStatsModalProfileId] = useState<string | null>(null);
   const [statsModalTitle, setStatsModalTitle] = useState<string | null>(null);
 
+  // HUD tools: search/filter (visual only)
+  const [hudSearchQuery, setHudSearchQuery] = useState<string>("");
+  const [hudFilterGroups, setHudFilterGroups] = useState<Record<string, boolean>>({
+    "Замки": true,
+    "Крепости": true,
+    "Донжоны": true,
+    "Башня": true,
+    "Халупа": true,
+  });
+
   const openBuildingCard = useCallback((tier: TierKey) => {
     setCardTier(tier);
     setIsBuildingCardOpen(true);
@@ -386,6 +396,9 @@ export default function Home() {
       setDataVersion((v) => v + 1);
 
       // Sprite factory (view-only)
+      // expose sprites for HUD filters/search
+      (appRef.current as any).__buildingSpritesByTier = {} as Partial<Record<TierKey, PIXI.Sprite>>;
+
       const setupBuildingSprite = (tier: TierKey, texture: PIXI.Texture) => {
         const container = new PIXI.Container();
         container.eventMode = "static";
@@ -428,6 +441,8 @@ export default function Home() {
 
         const userRot = typeof ((payloadRef.current?.buildings?.[tier] as any)?.rotation) === "number" ? (payloadRef.current!.buildings as any)[tier].rotation : 0;
         sprite.rotation = userRot;
+
+        ((appRef.current as any).__buildingSpritesByTier as any)[tier] = sprite;
 
         // Hover highlight
         let isHovered = false;
@@ -596,6 +611,50 @@ export default function Home() {
     };
   }, [authChecked, isAuthed, hostReady, center, openBuildingCard]);
 
+  // Apply HUD search/filter to building sprites (visual only)
+  useEffect(() => {
+    const spritesByTier = (appRef.current as any)?.__buildingSpritesByTier as Partial<Record<TierKey, PIXI.Sprite>> | undefined;
+    const pl = payloadRef.current;
+    if (!spritesByTier || !pl) return;
+
+    const q = (hudSearchQuery ?? "").toString().trim().toLocaleLowerCase("ru");
+
+    const baseGroupOfTier = (t: TierKey): string => {
+      if (t.startsWith("Замки")) return "Замки";
+      if (t.startsWith("Крепости")) return "Крепости";
+      if (t.startsWith("Донжоны")) return "Донжоны";
+      if (t.startsWith("Башня")) return "Башня";
+      if (t.startsWith("Халупа")) return "Халупа";
+      return t;
+    };
+
+    const playerNicknameForTier = (tier: TierKey): string => {
+      const players = (pl as any)?.players as Record<string, PlayerRec> | undefined;
+      if (!players) return "";
+      const found = Object.entries(players).find(([, p]) => normalizeTierKey(p, (pl as any)?.meta) === tier);
+      const p = found?.[1];
+      const nick = ((p as any)?.name ?? (p as any)?.nickname ?? "").toString().trim();
+      return nick;
+    };
+
+    for (const t of TIERS) {
+      const sprite = spritesByTier[t];
+      if (!sprite) continue;
+
+      const base = baseGroupOfTier(t);
+      const groupOn = hudFilterGroups?.[base] !== false;
+
+      let searchOn = true;
+      if (q) {
+        const nick = playerNicknameForTier(t).toLocaleLowerCase("ru");
+        searchOn = nick.includes(q);
+      }
+
+      // Hide/Show visually
+      sprite.visible = groupOn && searchOn;
+    }
+  }, [hudSearchQuery, hudFilterGroups, dataVersion]);
+
   // Handle ESC to close card
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -679,8 +738,19 @@ export default function Home() {
           fallbackAvatarUrl: "/people/u001.png",
         });
 
+        const nicknameOptions = Object.values(((payloadRef.current as any)?.players ?? {}) as Record<string, any>)
+          .map((p: any) => (p?.name ?? p?.nickname ?? "").toString().trim())
+          .filter(Boolean);
+
         return (
           <PlayerHud
+            nicknameOptions={nicknameOptions}
+            onSearchNicknames={(q) => {
+              setHudSearchQuery((q ?? "").toString());
+            }}
+            onFilterGroupsChange={(g) => {
+              setHudFilterGroups(g || {});
+            }}
             linkedPlayerName={(meUser as any)?.aoePlayer?.nickname ?? null}
             aoeProfileId={(meUser as any)?.aoePlayer?.aoeProfileId ?? null}
             steamConnected={steamConnected}

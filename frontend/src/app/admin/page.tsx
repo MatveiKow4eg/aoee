@@ -606,6 +606,13 @@ export default function AdminMapPage() {
 
       const t = normalizeTierKey(p);
       setPreviewTier((t || "") ? (t as TierKey) : null);
+      // Инициализируем отображаемое имя тира по текущему строению игрока
+      if (t) {
+        const cur = payloadRef.current?.meta?.tierNames?.[t];
+        setTierRename(typeof cur === "string" && cur.trim() ? cur : (t as TierKey));
+      } else {
+        setTierRename("");
+      }
     },
     [effectivePlayers, normalizeTierKey]
   );
@@ -629,14 +636,14 @@ export default function AdminMapPage() {
 
     setIsSavingAssignments(true);
     try {
-      const tier = selectedBuildingRef.current;
-      const tierName = tier ? tierRename.trim() : "";
+      const tierFromUi: TierKey | null = (isPlayerCardOpen && previewTier) ? (previewTier as TierKey) : selectedBuildingRef.current;
+      const tierName = tierFromUi ? tierRename.trim() : "";
 
       const nextMeta = {
         ...(pl.meta ?? {}),
         tierNames: {
           ...((pl.meta?.tierNames ?? {}) as any),
-          ...(tier && tierName ? { [tier]: tierName } : {}),
+          ...(tierFromUi && tierName ? { [tierFromUi]: tierName } : {}),
         },
       };
 
@@ -943,13 +950,33 @@ export default function AdminMapPage() {
           container.on("pointerout", onOut);
 
           (sprite as any).on("pointertap", () => {
-            if (!dragBuildingsRef.current) return;
+            if (dragBuildingsRef.current) {
+              setSelectedBuilding(tier);
+              const currentScale = (payloadRef.current?.buildings[tier] as any)?.scale;
+              setBuildingScale(typeof currentScale === "number" ? currentScale : 1);
+              const currentRotation = (payloadRef.current?.buildings[tier] as any)?.rotation;
+              setBuildingRotation(typeof currentRotation === "number" ? currentRotation : 0);
+              return;
+            }
 
+            // Normal mode: open Assignments for this tier and preselect the first player assigned to it
             setSelectedBuilding(tier);
-            const currentScale = (payloadRef.current?.buildings[tier] as any)?.scale;
-            setBuildingScale(typeof currentScale === "number" ? currentScale : 1);
-            const currentRotation = (payloadRef.current?.buildings[tier] as any)?.rotation;
-            setBuildingRotation(typeof currentRotation === "number" ? currentRotation : 0);
+            openAssignModalFor(tier);
+
+            // Compute players effectively to find the first assigned to this tier
+            try {
+              const basePlayers = canonicalizePlayersForEditor((payloadRef.current?.players as any) ?? {});
+              const entries = Object.entries(basePlayers) as [string, PlayerRec][];
+              const normalize = (p?: PlayerRec | null) => normalizeTierKey(p);
+              const first = entries.find(([_, p]) => normalize(p) === tier);
+              if (first) {
+                const [playerId] = first;
+                // Defer to allow modal to mount first
+                setTimeout(() => {
+                  openPlayerCard(playerId);
+                }, 0);
+              }
+            } catch {}
           });
 
           let isDragging = false;
@@ -1449,23 +1476,7 @@ export default function AdminMapPage() {
               </div>
             </div>
 
-            <div style={{ marginBottom: 14 }}>
-              <div style={{ opacity: 0.85, fontSize: 12, marginBottom: 6 }}>Название тира (отображение)</div>
-              <input
-                value={tierRename}
-                onChange={(e) => setTierRename(e.target.value)}
-                style={{
-                  width: "100%",
-                  padding: "10px 12px",
-                  borderRadius: 10,
-                  border: "1px solid rgba(255,255,255,0.18)",
-                  background: "rgba(255,255,255,0.05)",
-                  color: "#f6efe3",
-                  outline: "none",
-                }}
-              />
-            </div>
-
+            
             <div style={{ display: "flex", flexDirection: "column", gap: 10, overflow: "auto", maxHeight: "70vh", paddingRight: 6 }}>
               {allPlayers.map((p) => (
                 <div
@@ -1684,31 +1695,175 @@ export default function AdminMapPage() {
                 </div>
 
                 <div style={{ marginBottom: 14 }}>
-                  <div style={{ opacity: 0.85, fontSize: 12, marginBottom: 6 }}>Строение</div>
-                  <select
-                    value={(previewTier ?? "") as any}
-                    onChange={(e) => {
-                      const next = (e.target.value || "") as any;
-                      setPreviewTier((next || null) as any);
-                      movePlayer(playerCardId, next as any);
-                    }}
+                  <div style={{ opacity: 0.85, fontSize: 12, marginBottom: 6 }}>Здания</div>
+                  <div
                     style={{
-                      width: "100%",
-                      padding: "10px 12px",
-                      borderRadius: 10,
-                      border: "1px solid rgba(255,255,255,0.18)",
-                      background: "rgba(255,255,255,0.05)",
-                      color: "#f6efe3",
+                      display: "grid",
+                      gridTemplateColumns: "repeat(auto-fill, minmax(96px, 1fr))",
+                      gap: 10,
                     }}
                   >
-                    <option value="">Без строения</option>
-                    {TIERS.map((t) => (
-                      <option key={t} value={t}>
-                        {t}
-                      </option>
-                    ))}
-                  </select>
+                    {/* Плитка "Без строения" */}
+                    <button
+                      onClick={() => {
+                        setPreviewTier(null as any);
+                        movePlayer(playerCardId, "" as any);
+                      }}
+                      onMouseDown={(e) => {
+                        // Блокируем выделение текста при удержании
+                        e.preventDefault();
+                      }}
+                      style={{
+                        appearance: "none",
+                        border: (previewTier ?? "") === "" ? "2px solid #caa24d" : "1px solid rgba(255,255,255,0.18)",
+                        background: "rgba(255,255,255,0.05)",
+                        color: "#f6efe3",
+                        borderRadius: 12,
+                        padding: 8,
+                        cursor: "pointer",
+                        display: "flex",
+                        flexDirection: "column",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        gap: 6,
+                      }}
+                      title="Без строения"
+                    >
+                      <div
+                        style={{
+                          width: 72,
+                          height: 60,
+                          borderRadius: 8,
+                          border: "1px dashed rgba(255,255,255,0.22)",
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "center",
+                          opacity: 0.65,
+                          fontSize: 12,
+                        }}
+                      >
+                        —
+                      </div>
+                      <div style={{ fontSize: 12, opacity: 0.85, textAlign: "center" }}>Без строения</div>
+                    </button>
+
+                    {TIERS.map((t) => {
+                      const img = TIER_ICON_URL[t as keyof typeof TIER_ICON_URL] || "/buildings/castle/castle_v1.png";
+
+                      // Лонг-пресс превью фулл-скрин
+                      let pressTimer: any = null;
+                      const startPress = (playerId: string | null | undefined, tier: typeof t, imageUrl: string) => (
+                        e: React.MouseEvent<HTMLButtonElement> | React.TouchEvent<HTMLButtonElement>
+                      ) => {
+                        try { (e as any).preventDefault?.(); } catch {}
+                        clearTimeout(pressTimer);
+                        pressTimer = setTimeout(() => {
+                          // Показ фулл-скрин превью
+                          const overlay = document.createElement("div");
+                          overlay.style.position = "fixed";
+                          overlay.style.inset = "0";
+                          overlay.style.background = "rgba(0,0,0,0.85)";
+                          overlay.style.backdropFilter = "blur(2px)";
+                          overlay.style.zIndex = "100004";
+                          overlay.style.display = "flex";
+                          overlay.style.alignItems = "center";
+                          overlay.style.justifyContent = "center";
+                          overlay.style.padding = "20px";
+
+                          const imgEl = document.createElement("img");
+                          imgEl.src = imageUrl;
+                          imgEl.style.maxWidth = "95vw";
+                          imgEl.style.maxHeight = "95vh";
+                          imgEl.style.objectFit = "contain";
+                          imgEl.style.border = "1px solid rgba(255,255,255,0.2)";
+                          imgEl.style.borderRadius = "12px";
+                          overlay.appendChild(imgEl);
+
+                          const close = () => {
+                            try { document.body.removeChild(overlay); } catch {}
+                          };
+                          overlay.addEventListener("click", close);
+                          window.addEventListener("keydown", (ev) => {
+                            if (ev.key === "Escape") close();
+                          }, { once: true });
+                          document.body.appendChild(overlay);
+                        }, 420); // ~0.42s удержания
+                      };
+
+                      const cancelPress = () => {
+                        clearTimeout(pressTimer);
+                        pressTimer = null;
+                      };
+
+                      return (
+                        <button
+                          key={t}
+                          onClick={() => {
+                            setPreviewTier(t);
+                            movePlayer(playerCardId, t as any);
+                          }}
+                          onMouseDown={startPress(playerCardId, t, img)}
+                          onMouseUp={cancelPress}
+                          onMouseLeave={cancelPress}
+                          onTouchStart={startPress(playerCardId, t, img)}
+                          onTouchEnd={cancelPress}
+                          style={{
+                            appearance: "none",
+                            border: previewTier === t ? "2px solid #caa24d" : "1px solid rgba(255,255,255,0.18)",
+                            background: "rgba(255,255,255,0.05)",
+                            color: "#f6efe3",
+                            borderRadius: 12,
+                            padding: 8,
+                            cursor: "pointer",
+                            display: "flex",
+                            flexDirection: "column",
+                            alignItems: "center",
+                            justifyContent: "center",
+                            gap: 6,
+                          }}
+                          title={t}
+                        >
+                          <div
+                            style={{
+                              width: 72,
+                              height: 60,
+                              borderRadius: 8,
+                              overflow: "hidden",
+                              display: "flex",
+                              alignItems: "center",
+                              justifyContent: "center",
+                              background: "rgba(0,0,0,0.15)",
+                              border: "1px solid rgba(255,255,255,0.18)",
+                            }}
+                          >
+                            <img src={img} alt={t} style={{ maxWidth: "100%", maxHeight: "100%", objectFit: "contain" }} />
+                          </div>
+                          <div style={{ fontSize: 12, opacity: 0.85, textAlign: "center" }}>{t}</div>
+                        </button>
+                      );
+                    })}
+                  </div>
                 </div>
+
+                {previewTier && (
+                  <div style={{ marginBottom: 14 }}>
+                    <div style={{ opacity: 0.85, fontSize: 12, marginBottom: 6 }}>Название тира (отображение)</div>
+                    <input
+                      value={tierRename}
+                      onChange={(e) => setTierRename(e.target.value)}
+                      placeholder="Отображаемое имя строения"
+                      style={{
+                        width: "100%",
+                        padding: "10px 12px",
+                        borderRadius: 10,
+                        border: "1px solid rgba(255,255,255,0.18)",
+                        background: "rgba(255,255,255,0.05)",
+                        color: "#f6efe3",
+                        outline: "none",
+                      }}
+                    />
+                  </div>
+                )}
 
                 <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
                   <button
