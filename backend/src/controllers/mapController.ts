@@ -4,6 +4,13 @@ import { MapService } from '../services/mapService';
 import { AoePlayerDirectorySyncService } from '../services/aoePlayerDirectorySyncService';
 import { HttpError } from '../utils/httpError';
 
+const normalizeNicknameForDirectory = (name: any): string => {
+  const s = String(name ?? '').trim();
+  if (!s) return '';
+  // normalize spaces (including after dot) to reduce alias mismatch
+  return s.replace(/\s+/g, ' ');
+};
+
 const mapService = new MapService();
 const aoeDirSync = new AoePlayerDirectorySyncService();
 
@@ -68,6 +75,49 @@ export const putMapDefault: RequestHandler = async (req, res, next) => {
     // Save map state first.
     const savedPayload = await mapService.saveMap('default', payload, typeof version === 'number' ? version : undefined);
 
+    // Best-effort: upsert directory nickname from map payload (admin-edited display name).
+    // This helps alias-based stats sync and keeps roster aligned with map.
+    try {
+      const players = (savedPayload as any)?.players ?? {};
+      const updates = Object.values(players)
+        .map((p: any) => {
+          const aoeProfileId = (p?.aoeProfileId ?? p?.insightsUserId ?? '').toString().trim();
+          const nickname = normalizeNicknameForDirectory(p?.name);
+          return { aoeProfileId, nickname };
+        })
+        .filter((x: any) => x.aoeProfileId && x.nickname)
+        .slice(0, 200);
+
+      if (updates.length) {
+        void (async () => {
+          for (const u of updates) {
+            try {
+              await prisma.aoePlayer.upsert({
+                where: { aoeProfileId: u.aoeProfileId },
+                create: {
+                  aoeProfileId: u.aoeProfileId,
+                  aoeProfileUrl: '',
+                  nickname: u.nickname,
+                },
+                update: {
+                  // Always take admin-provided display name (source of truth for presentation)
+                  nickname: u.nickname,
+                },
+                select: { id: true },
+              });
+            } catch (e: any) {
+              console.warn('[map-save][aoe-player-upsert] failed', {
+                aoeProfileId: u.aoeProfileId,
+                reason: e?.message ? String(e.message) : 'unknown_error',
+              });
+            }
+          }
+        })();
+      }
+    } catch {
+      // ignore
+    }
+
     // Best-effort: ensure AoePlayer roster records exist for any aoeProfileIds present in map payload.
     // This keeps stats refresh working (refresh requires AoePlayer row).
     try {
@@ -93,7 +143,10 @@ export const putMapDefault: RequestHandler = async (req, res, next) => {
               console.warn('[map-save][aoe-dir-sync] failed', { aoeProfileId: id, reason: (r as any)?.reason });
             }
           } catch (e: any) {
-            console.warn('[map-save][aoe-dir-sync] exception', { aoeProfileId: id, reason: e?.message ? String(e.message) : 'unknown_error' });
+            console.warn('[map-save][aoe-dir-sync] exception', {
+              aoeProfileId: id,
+              reason: e?.message ? String(e.message) : 'unknown_error',
+            });
           }
         }
       })();
@@ -156,6 +209,46 @@ export const putMapDefaultPlayers: RequestHandler = async (req, res, next) => {
 
     const savedPayload = await mapService.savePlayers('default', players);
 
+    // Best-effort: upsert directory nickname from incoming map payload.
+    try {
+      const updates = Object.values(players)
+        .map((p: any) => {
+          const aoeProfileId = (p?.aoeProfileId ?? p?.insightsUserId ?? '').toString().trim();
+          const nickname = normalizeNicknameForDirectory(p?.name);
+          return { aoeProfileId, nickname };
+        })
+        .filter((x: any) => x.aoeProfileId && x.nickname)
+        .slice(0, 200);
+
+      if (updates.length) {
+        void (async () => {
+          for (const u of updates) {
+            try {
+              await prisma.aoePlayer.upsert({
+                where: { aoeProfileId: u.aoeProfileId },
+                create: {
+                  aoeProfileId: u.aoeProfileId,
+                  aoeProfileUrl: '',
+                  nickname: u.nickname,
+                },
+                update: {
+                  nickname: u.nickname,
+                },
+                select: { id: true },
+              });
+            } catch (e: any) {
+              console.warn('[map-save][aoe-player-upsert] failed', {
+                aoeProfileId: u.aoeProfileId,
+                reason: e?.message ? String(e.message) : 'unknown_error',
+              });
+            }
+          }
+        })();
+      }
+    } catch {
+      // ignore
+    }
+
     // Best-effort: ensure roster records exist for any incoming aoeProfileIds.
     try {
       const ids = Array.from(
@@ -176,7 +269,10 @@ export const putMapDefaultPlayers: RequestHandler = async (req, res, next) => {
               console.warn('[map-save][aoe-dir-sync] failed', { aoeProfileId: id, reason: (r as any)?.reason });
             }
           } catch (e: any) {
-            console.warn('[map-save][aoe-dir-sync] exception', { aoeProfileId: id, reason: e?.message ? String(e.message) : 'unknown_error' });
+            console.warn('[map-save][aoe-dir-sync] exception', {
+              aoeProfileId: id,
+              reason: e?.message ? String(e.message) : 'unknown_error',
+            });
           }
         }
       })();
