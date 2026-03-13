@@ -83,12 +83,17 @@ export const putMapDefault: RequestHandler = async (req, res, next) => {
       // Keep it conservative to avoid heavy work on save.
       const limited = ids.slice(0, 200);
 
+      // Do not block save response; run in background.
       void (async () => {
         for (const id of limited) {
           try {
-            await aoeDirSync.syncByAoeProfileId(id);
-          } catch {
-            // ignore
+            const r = await aoeDirSync.syncByAoeProfileId(id);
+            // Minimal safe log for ops visibility (only on failures).
+            if (!(r as any)?.ok) {
+              console.warn('[map-save][aoe-dir-sync] failed', { aoeProfileId: id, reason: (r as any)?.reason });
+            }
+          } catch (e: any) {
+            console.warn('[map-save][aoe-dir-sync] exception', { aoeProfileId: id, reason: e?.message ? String(e.message) : 'unknown_error' });
           }
         }
       })();
@@ -162,12 +167,16 @@ export const putMapDefaultPlayers: RequestHandler = async (req, res, next) => {
       );
 
       const limited = ids.slice(0, 200);
+      // Do not block save response; run in background.
       void (async () => {
         for (const id of limited) {
           try {
-            await aoeDirSync.syncByAoeProfileId(id);
-          } catch {
-            // ignore
+            const r = await aoeDirSync.syncByAoeProfileId(id);
+            if (!(r as any)?.ok) {
+              console.warn('[map-save][aoe-dir-sync] failed', { aoeProfileId: id, reason: (r as any)?.reason });
+            }
+          } catch (e: any) {
+            console.warn('[map-save][aoe-dir-sync] exception', { aoeProfileId: id, reason: e?.message ? String(e.message) : 'unknown_error' });
           }
         }
       })();
