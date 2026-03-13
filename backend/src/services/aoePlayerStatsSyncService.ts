@@ -36,7 +36,7 @@ export class AoePlayerStatsSyncService {
     if (!id) return { ok: false, status: 'failed', aoeProfileId: id, reason: 'empty_aoeProfileId' };
 
     // Targeted debug (safe): enabled only for specific profile ids.
-    const debugIds = new Set(['11375082', '420789']);
+    const debugIds = new Set(['11375082', '420789', '4207889']);
     const debug = debugIds.has(id);
 
     try {
