@@ -56,12 +56,47 @@ export class AoePlayerDirectorySyncService {
     const id = String(aoeProfileId || '').trim();
     if (!id) return { ok: false, status: 'failed', aoeProfileId: id, reason: 'empty_aoeProfileId' };
 
+    // Targeted debug (safe): enabled only for a couple of profile ids.
+    const debugIds = new Set(['11375082', '420789']);
+    const debug = debugIds.has(id);
+
     try {
       const rawArr = await this.we.getRecentMatchHistoryByProfileIds([id]);
       const raw = rawArr?.[0];
+      if (debug) {
+        console.log('[aoe-dir-sync][debug] recentMatchHistory response summary', {
+          aoeProfileId: id,
+          rawArrIsArray: Array.isArray(rawArr),
+          rawArrLen: Array.isArray(rawArr) ? rawArr.length : null,
+          rawType: Array.isArray(raw) ? 'array' : typeof raw,
+          rawKeys: raw && typeof raw === 'object' && !Array.isArray(raw) ? Object.keys(raw).slice(0, 40) : null,
+        });
+      }
+
       const identity = this.we.extractIdentityFromRecentMatchHistory(raw, id);
+      if (debug) {
+        console.log('[aoe-dir-sync][debug] extracted identity', {
+          aoeProfileId: id,
+          identity,
+        });
+      }
 
       const existing = await this.repo.findByAoeProfileId(id);
+
+      if (debug) {
+        console.log('[aoe-dir-sync][debug] existing aoePlayer', {
+          aoeProfileId: id,
+          exists: !!existing,
+          existing: existing
+            ? {
+                id: (existing as any).id,
+                aoeProfileId: (existing as any).aoeProfileId,
+                nickname: (existing as any).nickname,
+                steamId: (existing as any).steamId ?? null,
+              }
+            : null,
+        });
+      }
 
       if (!existing) {
         // Create new record.
@@ -69,11 +104,26 @@ export class AoePlayerDirectorySyncService {
         const nickname = (identity.nickname ?? '').trim();
         const safeNickname = nickname || `Player ${id}`;
 
+        if (debug) {
+          console.log('[aoe-dir-sync][debug] creating aoePlayer', {
+            aoeProfileId: id,
+            nickname,
+            safeNickname,
+            identity,
+          });
+        }
+
         await this.repo.createIfMissing({
           aoeProfileId: id,
           aoeProfileUrl: '',
           nickname: safeNickname,
         });
+
+        if (debug) {
+          console.log('[aoe-dir-sync][debug] created aoePlayer (post-create lookup)', {
+            aoeProfileId: id,
+          });
+        }
 
         // Apply steamId if we got it (createIfMissing doesn't set it)
         if (identity.steamId) {
@@ -121,6 +171,12 @@ export class AoePlayerDirectorySyncService {
 
       return { ok: true, status: didUpdate ? 'updated' : 'noop', player: updatedPlayer, identity };
     } catch (e: any) {
+      if (debug) {
+        console.warn('[aoe-dir-sync][debug] sync failed', {
+          aoeProfileId: id,
+          reason: e?.message ? String(e.message) : 'unknown_error',
+        });
+      }
       return {
         ok: false,
         status: 'failed',
