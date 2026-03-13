@@ -81,6 +81,10 @@ export class AoePlayerDirectorySyncService {
         });
       }
 
+      if (identity?.steamId && debug) {
+        console.log('[aoe-dir-sync][debug] steamId found from identity', { aoeProfileId: id, steamId: identity.steamId });
+      }
+
       const existing = await this.repo.findByAoeProfileId(id);
 
       if (debug) {
@@ -129,6 +133,7 @@ export class AoePlayerDirectorySyncService {
         if (identity.steamId) {
           try {
             await this.repo.updateDirectoryFieldsByAoeProfileId({ aoeProfileId: id, steamId: identity.steamId });
+            if (debug) console.log('[aoe-dir-sync][debug] steamId saved to aoe_players', { aoeProfileId: id, steamId: identity.steamId });
           } catch {
             // ignore steamId conflicts (unique)
           }
@@ -141,6 +146,14 @@ export class AoePlayerDirectorySyncService {
       // Update existing (directory enrichment)
       const patchNickname = this.pickNickname({ existingNickname: existing.nickname, incomingNickname: identity.nickname ?? null });
       const patchSteamId = this.pickSteamId({ existingSteamId: (existing as any).steamId ?? null, incomingSteamId: identity.steamId ?? null });
+      if (debug && patchSteamId) {
+        console.log('[aoe-dir-sync][debug] will patch steamId', {
+          aoeProfileId: id,
+          existingSteamId: (existing as any).steamId ?? null,
+          incomingSteamId: identity.steamId ?? null,
+          patchSteamId,
+        });
+      }
 
       let updatedPlayer = existing;
       let didUpdate = false;

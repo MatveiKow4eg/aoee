@@ -126,6 +126,11 @@ export class WorldsEdgeApiService {
     tryPush(raw?.matchHistoryStats?.players);
     tryPush(raw?.lastMatch?.players);
     tryPush(raw?.matchHistoryStats?.matches?.flatMap?.((m: any) => m?.players ?? []) ?? null);
+
+    // Some upstream shapes include a top-level `profiles` array keyed by profile_id.
+    // Use it as an additional source of identity.
+    tryPush(raw?.profiles);
+
     // fallback: if raw itself is array, treat as players
     if (Array.isArray(raw)) tryPush(raw);
 
@@ -155,6 +160,9 @@ export class WorldsEdgeApiService {
     const nickname = (found?.alias ?? found?.name ?? found?.player_name ?? found?.playerName ?? null) as any;
     const steamProfileName = (found?.steam_profile_name ?? found?.steamProfileName ?? found?.profile_name ?? found?.profileName ?? null) as any;
 
+    // Some shapes may provide steam id directly.
+    const steamIdRaw = (found?.steam_id ?? found?.steamId ?? null) as any;
+
     identity.nickname = typeof nickname === 'string' && nickname.trim() ? nickname.trim() : null;
     identity.steamProfileName = typeof steamProfileName === 'string' && steamProfileName.trim() ? steamProfileName.trim() : null;
 
@@ -162,6 +170,16 @@ export class WorldsEdgeApiService {
     if (identity.steamProfileName) {
       const m = identity.steamProfileName.match(/^\/steam\/(\d{10,30})$/);
       identity.steamId = m ? m[1] : null;
+    }
+
+    // Direct steamId field fallback
+    if (!identity.steamId && typeof steamIdRaw === 'string') {
+      const v = steamIdRaw.trim();
+      if (/^\d{10,30}$/.test(v)) identity.steamId = v;
+    }
+    if (!identity.steamId && typeof steamIdRaw === 'number' && Number.isFinite(steamIdRaw)) {
+      const v = String(Math.trunc(steamIdRaw));
+      if (/^\d{10,30}$/.test(v)) identity.steamId = v;
     }
 
     return identity;
