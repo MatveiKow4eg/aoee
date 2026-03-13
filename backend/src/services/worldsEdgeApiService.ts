@@ -68,7 +68,8 @@ export class WorldsEdgeApiService {
     for (const c of chunks) {
       const url = new URL(`${this.baseUrl}/getRecentMatchHistory`);
       url.searchParams.set('title', 'age2');
-      url.searchParams.set('profile_ids', c.join(','));
+      // Upstream expects JSON array for profile_ids (not a comma-separated string)
+      url.searchParams.set('profile_ids', JSON.stringify(c));
 
       const res = await withTimeout(
         fetch(url.toString(), {
