@@ -220,6 +220,10 @@ export default function Home() {
   const [statsModalProfileId, setStatsModalProfileId] = useState<string | null>(null);
   const [statsModalTitle, setStatsModalTitle] = useState<string | null>(null);
 
+  // Challenges UI state (user)
+  const [challengeCheck, setChallengeCheck] = useState<{ status: 'idle' } | { status: 'loading' } | { status: 'ok'; data: any } | { status: 'error'; message: string }>({ status: 'idle' });
+  const [isCreatingChallenge, setIsCreatingChallenge] = useState(false);
+
   // HUD tools: search/filter (visual only)
   const [hudSearchQuery, setHudSearchQuery] = useState<string>("");
   const [hudFilterGroups, setHudFilterGroups] = useState<Record<string, boolean>>({
@@ -234,6 +238,7 @@ export default function Home() {
     setCardTier(tier);
     setIsBuildingCardOpen(true);
     setIsDetailsOpen(false);
+    setChallengeCheck({ status: 'idle' });
   }, []);
 
   const closeBuildingCard = useCallback(() => {
@@ -1040,6 +1045,31 @@ export default function Home() {
 
               const canShowStats = !!buildingAoeProfileId.trim() || !!buildingNickname.trim();
 
+              // Resolve target user id for challenges: requires map payload to include userId in playerRec.extra.
+              const targetUserId = (
+                (playerRec as any)?.userId ??
+                (playerRec as any)?.extraJson?.userId ??
+                (playerRec as any)?.extra?.userId ??
+                ''
+              ).toString().trim();
+
+              const myUserId = (meUser as any)?.id ? String((meUser as any).id) : '';
+              const isSelf = !!myUserId && !!targetUserId && myUserId === targetUserId;
+
+              // Fetch canChallenge lazily when card opens and we know the target.
+              if (targetUserId && !isSelf && challengeCheck.status === 'idle') {
+                setChallengeCheck({ status: 'loading' });
+                void (async () => {
+                  try {
+                    const { canChallenge } = await import('../lib/api/challenges');
+                    const r = await canChallenge(targetUserId);
+                    setChallengeCheck({ status: 'ok', data: r });
+                  } catch (e: any) {
+                    setChallengeCheck({ status: 'error', message: e?.message ? String(e.message) : 'Failed to check challenge' });
+                  }
+                })();
+              }
+
               return (
                 <div style={{ display: "flex", flexDirection: "column", gap: 12, alignItems: "center" }}>
                   {avatar ? (
@@ -1088,6 +1118,87 @@ export default function Home() {
                   </div>
 
                   <div style={{ display: "flex", gap: 10, flexWrap: "wrap", justifyContent: "center" }}>
+                    {/* Challenge button (only for чужое строение) */}
+                    {targetUserId && !isSelf && (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 6, alignItems: 'center' }}>
+                        <button
+                          onClick={async () => {
+                            try {
+                              if (isCreatingChallenge) return;
+                              setIsCreatingChallenge(true);
+                              const { createChallenge } = await import('../lib/api/challenges');
+                              await createChallenge(targetUserId);
+                              const { canChallenge } = await import('../lib/api/challenges');
+                              const r = await canChallenge(targetUserId);
+                              setChallengeCheck({ status: 'ok', data: r });
+                              window.alert('Вызов отправлен');
+                            } catch (e: any) {
+                              const code = e?.code ? String(e.code) : 'ERROR';
+                              const msg = e?.message ? String(e.message) : 'Failed to create challenge';
+                              window.alert(`${code}: ${msg}`);
+                            } finally {
+                              setIsCreatingChallenge(false);
+                            }
+                          }}
+                          disabled={
+                            isCreatingChallenge ||
+                            (challengeCheck.status === 'ok' && (challengeCheck as any).data?.canChallenge === false)
+                          }
+                          style={{
+                            padding: '10px 14px',
+                            borderRadius: 10,
+                            border: '1px solid #caa24d',
+                            background:
+                              challengeCheck.status === 'ok' && (challengeCheck as any).data?.canChallenge === false
+                                ? 'rgba(255,255,255,0.06)'
+                                : '#caa24d',
+                            color:
+                              challengeCheck.status === 'ok' && (challengeCheck as any).data?.canChallenge === false
+                                ? '#f7f0df'
+                                : '#1b1b1b',
+                            cursor:
+                              isCreatingChallenge ||
+                              (challengeCheck.status === 'ok' && (challengeCheck as any).data?.canChallenge === false)
+                                ? 'not-allowed'
+                                : 'pointer',
+                            fontWeight: 900,
+                            opacity: isCreatingChallenge ? 0.7 : 1,
+                          }}
+                          title='Бросить вызов'
+                        >
+                          {challengeCheck.status === 'loading'
+                            ? 'Проверка…'
+                            : challengeCheck.status === 'ok' && (challengeCheck as any).data?.canChallenge === false
+                              ? 'Вызов недоступен'
+                              : 'Бросить вызов'}
+                        </button>
+
+                        {challengeCheck.status === 'ok' && (challengeCheck as any).data?.canChallenge === false && (
+                          <div style={{ fontSize: 12, opacity: 0.85, textAlign: 'center', maxWidth: 340 }}>
+                            {(() => {
+                              const d = (challengeCheck as any).data || {};
+                              const reason = String(d.reason || '');
+                              if (reason === 'COOLDOWN_ACTIVE') {
+                                const until = d.cooldownUntil ? new Date(String(d.cooldownUntil)).toLocaleString() : '';
+                                return until ? `Кулдаун активен до ${until}` : 'Кулдаун активен';
+                              }
+                              if (reason === 'ACTIVE_CHALLENGE_EXISTS') {
+                                return 'У тебя уже есть активный исходящий вызов';
+                              }
+                              if (reason === 'SELF_CHALLENGE') return 'Нельзя бросить вызов самому себе';
+                              if (reason === 'TARGET_NOT_FOUND') return 'Цель не найдена';
+                              return `Недоступно: ${reason || 'UNKNOWN'}`;
+                            })()}
+                          </div>
+                        )}
+
+                        {challengeCheck.status === 'error' && (
+                          <div style={{ fontSize: 12, color: '#ffb4b4', textAlign: 'center', maxWidth: 340 }}>
+                            {(challengeCheck as any).message}
+                          </div>
+                        )}
+                      </div>
+                    )}
                     <button
                       onClick={() => {
                         setIsDetailsOpen((v) => !v);

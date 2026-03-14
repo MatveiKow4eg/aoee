@@ -47,6 +47,40 @@ const mergeSteamIdsIntoMapPlayers = async (players: Record<string, any> | null |
   return next;
 };
 
+const mergeUserIdsIntoMapPlayers = async (players: Record<string, any> | null | undefined) => {
+  const src = (players ?? {}) as Record<string, any>;
+  const items = Object.entries(src).map(([playerKey, p]) => {
+    const aoeProfileId = (p?.aoeProfileId ?? p?.insightsUserId ?? '').toString().trim();
+    const userId = (p?.userId ?? '').toString().trim();
+    return { playerKey, aoeProfileId, userId };
+  });
+
+  const missing = items.filter((it) => it.aoeProfileId && !it.userId);
+  if (missing.length === 0) return src;
+
+  const aoeProfileIds = Array.from(new Set(missing.map((m) => m.aoeProfileId)));
+  if (aoeProfileIds.length === 0) return src;
+
+  // AoePlayer.claimedByUserId is unique: that's our owner link.
+  const rows = await prisma.aoePlayer.findMany({
+    where: { aoeProfileId: { in: aoeProfileIds } },
+    select: { aoeProfileId: true, claimedByUserId: true },
+  });
+  const userByProfileId = new Map(rows.filter((r) => r.claimedByUserId).map((r) => [r.aoeProfileId, r.claimedByUserId!]));
+
+  if (userByProfileId.size === 0) return src;
+
+  const next: Record<string, any> = { ...src };
+  for (const it of missing) {
+    const uid = userByProfileId.get(it.aoeProfileId);
+    if (!uid) continue;
+    const cur = next[it.playerKey] ?? {};
+    next[it.playerKey] = { ...cur, userId: uid };
+  }
+
+  return next;
+};
+
 export const getMapDefault: RequestHandler = async (_req, res, next) => {
   try {
     const payload = await mapService.getMapPayload('default');
@@ -55,6 +89,14 @@ export const getMapDefault: RequestHandler = async (_req, res, next) => {
     // This lets admin UI "подсасывать" steamId without manually re-entering it.
     try {
       (payload as any).players = await mergeSteamIdsIntoMapPlayers((payload as any).players);
+    } catch {
+      // ignore
+    }
+
+    // Best-effort: enrich map payload with userId values based on claim links.
+    // This is needed to implement challenges from a building/card reliably.
+    try {
+      (payload as any).players = await mergeUserIdsIntoMapPlayers((payload as any).players);
     } catch {
       // ignore
     }
@@ -190,6 +232,13 @@ export const getMapDefaultPlayers: RequestHandler = async (_req, res, next) => {
     // Best-effort: enrich map payload with known steamId values from the AoePlayer roster.
     try {
       (payload as any).players = await mergeSteamIdsIntoMapPlayers((payload as any).players);
+    } catch {
+      // ignore
+    }
+
+    // Best-effort: enrich map payload with userId values based on claim links.
+    try {
+      (payload as any).players = await mergeUserIdsIntoMapPlayers((payload as any).players);
     } catch {
       // ignore
     }

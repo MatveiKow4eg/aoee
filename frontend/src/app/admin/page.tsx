@@ -1169,6 +1169,9 @@ export default function AdminMapPage() {
             <a href="/" style={{ color: "#caa24d", fontWeight: 900, textDecoration: "none" }}>
               Back to map
             </a>
+            <a href="/admin/challenges" style={{ color: "#caa24d", fontWeight: 900, textDecoration: "none" }}>
+              Challenges
+            </a>
             <a href="/login?next=%2Fadmin" style={{ color: "#caa24d", fontWeight: 900, textDecoration: "none" }}>
               Login as another user
             </a>
