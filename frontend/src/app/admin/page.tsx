@@ -6,6 +6,7 @@ import * as PIXI from "pixi.js";
 import { Viewport } from "pixi-viewport";
 import { debounce, loadMapState, saveMapState } from "../../store/mapStateStore";
 import { me } from "../../lib/api/auth";
+import { adminClearCooldown, adminListCooldownUsers } from "../../lib/api/challenges";
 
 // Disable createImageBitmap globally to avoid Chromium decode flakiness
 try {
@@ -287,6 +288,14 @@ export default function AdminMapPage() {
   const [tierRename, setTierRename] = useState("");
   const [stagedPlayers, setStagedPlayers] = useState<Record<string, PlayerRec> | null>(null);
   const [isSavingAssignments, setIsSavingAssignments] = useState(false);
+
+  const [cooldownsOpen, setCooldownsOpen] = useState(false);
+  const [cooldownsState, setCooldownsState] = useState<
+    | { status: "idle" }
+    | { status: "loading" }
+    | { status: "ok"; users: any[] }
+    | { status: "error"; message: string }
+  >({ status: "idle" });
 
   // Single-player card inside Assignments
   const [playerCardId, setPlayerCardId] = useState<string | null>(null);
@@ -1308,7 +1317,163 @@ export default function AdminMapPage() {
         >
           Challenges
         </button>
+
+        <button
+          onClick={async () => {
+            setCooldownsOpen(true);
+            setCooldownsState({ status: "loading" });
+            try {
+              const r = await adminListCooldownUsers();
+              const users = (r as any)?.users ?? [];
+              setCooldownsState({ status: "ok", users: Array.isArray(users) ? users : [] });
+            } catch (e: any) {
+              setCooldownsState({ status: "error", message: e?.message ? String(e.message) : "Failed to load cooldowns" });
+            }
+          }}
+          style={{
+            appearance: "none",
+            border: "1px solid rgba(255,255,255,0.25)",
+            background: "rgba(0,0,0,0.35)",
+            color: "rgba(255,255,255,0.95)",
+            fontWeight: 900,
+            borderRadius: 10,
+            padding: "8px 12px",
+            cursor: "pointer",
+          }}
+          title="Пользователи с активным кулдауном"
+        >
+          Cooldowns
+        </button>
       </div>
+
+      {cooldownsOpen && (
+        <div
+          onClick={() => setCooldownsOpen(false)}
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(0,0,0,0.55)",
+            backdropFilter: "blur(2px)",
+            zIndex: 100002,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            padding: 20,
+          }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              width: "min(860px, 100%)",
+              maxHeight: "92dvh",
+              overflow: "auto",
+              background: "#0f1626",
+              border: "1px solid rgba(255,255,255,0.12)",
+              borderRadius: 14,
+              padding: 16,
+              color: "#f6efe3",
+              boxShadow: "0 18px 48px rgba(0,0,0,0.55)",
+            }}
+          >
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, marginBottom: 14 }}>
+              <div style={{ fontWeight: 900, fontSize: 18 }}>Cooldowns</div>
+              <button
+                onClick={() => setCooldownsOpen(false)}
+                style={{
+                  appearance: "none",
+                  border: "1px solid rgba(255,255,255,0.25)",
+                  background: "rgba(0,0,0,0.35)",
+                  color: "rgba(255,255,255,0.95)",
+                  fontWeight: 800,
+                  borderRadius: 10,
+                  padding: "8px 12px",
+                  cursor: "pointer",
+                }}
+              >
+                Закрыть
+              </button>
+            </div>
+
+            {cooldownsState.status === "loading" && <div style={{ opacity: 0.85 }}>Загрузка…</div>}
+            {cooldownsState.status === "error" && <div style={{ opacity: 0.9 }}>{cooldownsState.message}</div>}
+
+            {cooldownsState.status === "ok" && (
+              <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                {cooldownsState.users.length === 0 ? (
+                  <div style={{ opacity: 0.75 }}>Нет активных кулдаунов</div>
+                ) : (
+                  cooldownsState.users.map((u) => {
+                    const until = u?.challengeCooldownUntil ? String(u.challengeCooldownUntil) : "";
+                    const untilLabel = (() => {
+                      if (!until) return "";
+                      try {
+                        return new Date(until).toLocaleString();
+                      } catch {
+                        return until;
+                      }
+                    })();
+
+                    return (
+                      <div
+                        key={String(u?.id)}
+                        style={{
+                          display: "grid",
+                          gridTemplateColumns: "minmax(0,1fr) auto",
+                          gap: 12,
+                          alignItems: "center",
+                          padding: 12,
+                          borderRadius: 12,
+                          background: "rgba(255,255,255,0.05)",
+                          border: "1px solid rgba(255,255,255,0.10)",
+                        }}
+                      >
+                        <div style={{ minWidth: 0 }}>
+                          <div style={{ fontWeight: 900, fontSize: 15, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                            {u?.displayName || u?.email || u?.id}
+                          </div>
+                          <div style={{ opacity: 0.75, fontSize: 12, marginTop: 4, wordBreak: "break-word" }}>
+                            {u?.email ? `email: ${u.email}` : ""}
+                            {untilLabel ? ` • cooldownUntil: ${untilLabel}` : ""}
+                          </div>
+                        </div>
+
+                        <button
+                          onClick={async () => {
+                            const ok = window.confirm(`Снять кулдаун у ${u?.displayName || u?.email || u?.id}?`);
+                            if (!ok) return;
+                            try {
+                              await adminClearCooldown(String(u.id));
+                              // update list locally
+                              setCooldownsState((prev) =>
+                                prev.status === "ok" ? { status: "ok", users: prev.users.filter((x: any) => String(x?.id) !== String(u.id)) } : prev
+                              );
+                            } catch (e: any) {
+                              alert(e?.message ? String(e.message) : "Failed to clear cooldown");
+                            }
+                          }}
+                          style={{
+                            appearance: "none",
+                            border: "1px solid #caa24d",
+                            background: "#caa24d",
+                            color: "#1b1b1b",
+                            fontWeight: 900,
+                            borderRadius: 10,
+                            padding: "8px 12px",
+                            cursor: "pointer",
+                          }}
+                          title="Снять кулдаун"
+                        >
+                          Снять
+                        </button>
+                      </div>
+                    );
+                  })
+                )}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Admin bottom-right controls */}
       <div

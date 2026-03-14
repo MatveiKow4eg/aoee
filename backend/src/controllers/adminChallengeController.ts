@@ -162,3 +162,62 @@ export const postAdminCancelChallenge: RequestHandler = async (req, res, next) =
     next(e);
   }
 };
+
+export const getAdminCooldownUsers: RequestHandler = async (req, res, next) => {
+  try {
+    const admin = requireAdmin(req as any);
+    void admin;
+
+    const { prisma } = await import('../db/prisma');
+    const now = new Date();
+
+    const users = await prisma.user.findMany({
+      where: {
+        challengeCooldownUntil: {
+          not: null,
+          gt: now,
+        },
+      },
+      select: {
+        id: true,
+        displayName: true,
+        email: true,
+        challengeCooldownUntil: true,
+        role: true,
+      },
+      orderBy: {
+        challengeCooldownUntil: 'desc',
+      },
+    });
+
+    res.json({ users });
+  } catch (e) {
+    next(e);
+  }
+};
+
+export const postAdminClearCooldown: RequestHandler = async (req, res, next) => {
+  try {
+    const admin = requireAdmin(req as any);
+    void admin;
+
+    const userId = String((req.params as any)?.userId || '').trim();
+    if (!userId) throw new HttpError(400, 'BAD_REQUEST', 'userId is required');
+
+    const { prisma } = await import('../db/prisma');
+    const updated = await prisma.user.update({
+      where: { id: userId },
+      data: { challengeCooldownUntil: null },
+      select: {
+        id: true,
+        displayName: true,
+        email: true,
+        challengeCooldownUntil: true,
+      },
+    });
+
+    res.json({ user: updated });
+  } catch (e) {
+    next(e);
+  }
+};

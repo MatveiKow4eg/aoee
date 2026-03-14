@@ -69,6 +69,7 @@ export default function PlayerHud({ nickname, title, tierLabel, avatarUrl, build
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [statsOpen, setStatsOpen] = useState(false);
   const [historyModalOpen, setHistoryModalOpen] = useState(false);
+  const [historyExpanded, setHistoryExpanded] = useState(false);
   const [historyState, setHistoryState] = useState<
     | { status: "idle" }
     | { status: "loading" }
@@ -93,6 +94,7 @@ export default function PlayerHud({ nickname, title, tierLabel, avatarUrl, build
   });
   // History modal: shows ALL challenges (admin endpoint)
   const openHistoryModal = async () => {
+    setHistoryExpanded(false);
     setHistoryModalOpen(true);
     setHistoryState({ status: "loading" });
     try {
@@ -174,23 +176,24 @@ export default function PlayerHud({ nickname, title, tierLabel, avatarUrl, build
       <div
         title={name}
         style={{
-          width: 40,
-          height: 40,
+          width: 56,
+          height: 56,
           borderRadius: 999,
-          border: "1px solid rgba(202,162,77,0.55)",
+          border: "1px solid rgba(202,162,77,0.65)",
           overflow: "hidden",
           background: "rgba(255,255,255,0.06)",
           display: "grid",
           placeItems: "center",
           color: "rgba(247,240,223,0.92)",
           fontWeight: 900,
+          boxShadow: "0 10px 18px rgba(0,0,0,0.35)",
         }}
       >
         {url ? (
           // eslint-disable-next-line @next/next/no-img-element
           <img src={url} alt={name} style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }} />
         ) : (
-          <span>{initial}</span>
+          <span style={{ fontSize: 18 }}>{initial}</span>
         )}
       </div>
     );
@@ -864,6 +867,28 @@ export default function PlayerHud({ nickname, title, tierLabel, avatarUrl, build
                       </button>
                     </div>
 
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, marginBottom: 10 }}>
+                      <div style={{ opacity: 0.75, fontSize: 12 }}>
+                        {historyState.status === "ok" ? `${historyState.challenges.length} записей` : ""}
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setHistoryExpanded((v) => !v)}
+                        style={{
+                          padding: "8px 12px",
+                          borderRadius: 10,
+                          border: "1px solid rgba(202,162,77,0.9)",
+                          background: "rgba(202,162,77,0.18)",
+                          color: "#f7f0df",
+                          fontWeight: 900,
+                          cursor: "pointer",
+                        }}
+                        title="Показать всю историю"
+                      >
+                        История
+                      </button>
+                    </div>
+
                     {historyState.status === "loading" && <div style={{ opacity: 0.9, lineHeight: 1.4 }}>Загрузка…</div>}
 
                     {historyState.status === "error" && <div style={{ opacity: 0.9, lineHeight: 1.4 }}>{historyState.message}</div>}
@@ -873,73 +898,81 @@ export default function PlayerHud({ nickname, title, tierLabel, avatarUrl, build
                         {historyState.challenges.length === 0 ? (
                           <div style={{ opacity: 0.8, fontSize: 12 }}>Пусто</div>
                         ) : (
-                          historyState.challenges.map((ch, idx) => {
-                            const vm = challengeVm(ch);
-                            const badgeBg =
-                              vm.outcome.tone === "win"
-                                ? "rgba(43,187,115,0.18)"
-                                : vm.outcome.tone === "loss"
-                                  ? "rgba(232,76,61,0.18)"
-                                  : vm.outcome.tone === "pending"
-                                    ? "rgba(202,162,77,0.16)"
-                                    : "rgba(255,255,255,0.08)";
-                            const badgeBorder =
-                              vm.outcome.tone === "win"
-                                ? "rgba(43,187,115,0.55)"
-                                : vm.outcome.tone === "loss"
-                                  ? "rgba(232,76,61,0.55)"
-                                  : vm.outcome.tone === "pending"
-                                    ? "rgba(202,162,77,0.55)"
-                                    : "rgba(255,255,255,0.16)";
+                          historyState.challenges
+                            .slice(0, historyExpanded ? 200 : 3)
+                            .map((ch, idx) => {
+                              const vm = challengeVm(ch);
+                              const badgeBg =
+                                vm.outcome.tone === "win"
+                                  ? "rgba(43,187,115,0.18)"
+                                  : vm.outcome.tone === "loss"
+                                    ? "rgba(232,76,61,0.18)"
+                                    : vm.outcome.tone === "pending"
+                                      ? "rgba(202,162,77,0.16)"
+                                      : "rgba(255,255,255,0.08)";
+                              const badgeBorder =
+                                vm.outcome.tone === "win"
+                                  ? "rgba(43,187,115,0.55)"
+                                  : vm.outcome.tone === "loss"
+                                    ? "rgba(232,76,61,0.55)"
+                                    : vm.outcome.tone === "pending"
+                                      ? "rgba(202,162,77,0.55)"
+                                      : "rgba(255,255,255,0.16)";
 
-                            return (
-                              <div
-                                key={String(ch?.id || idx)}
-                                style={{
-                                  padding: 10,
-                                  borderRadius: 12,
-                                  background: "rgba(255,255,255,0.06)",
-                                  border: "1px solid rgba(255,255,255,0.10)",
-                                  display: "grid",
-                                  gridTemplateColumns: "1fr auto",
-                                  gap: 10,
-                                  alignItems: "center",
-                                }}
-                                title={String(ch?.id || "")}
-                              >
-                                <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0 }}>
-                                  <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
-                                    <Avatar url={vm.aAvatar} name={vm.aName} />
-                                    <div style={{ fontWeight: 900, fontSize: 13, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{vm.aName}</div>
+                              const isHero = !historyExpanded && idx < 3;
+
+                              return (
+                                <div
+                                  key={String(ch?.id || idx)}
+                                  style={{
+                                    padding: isHero ? 20 : 12,
+                                    borderRadius: isHero ? 18 : 12,
+                                    background: isHero ? "rgba(255,255,255,0.085)" : "rgba(255,255,255,0.055)",
+                                    border: isHero ? "1px solid rgba(202,162,77,0.35)" : "1px solid rgba(255,255,255,0.10)",
+                                    display: "grid",
+                                    gridTemplateColumns: "1fr auto",
+                                    gap: isHero ? 18 : 12,
+                                    alignItems: "center",
+                                  }}
+                                  title={String(ch?.id || "")}
+                                >
+                                  <div style={{ display: "flex", alignItems: "center", gap: isHero ? 18 : 12, minWidth: 0 }}>
+                                    <div style={{ display: "flex", alignItems: "center", gap: 12, minWidth: 0 }}>
+                                      <div style={{ transform: isHero ? "scale(1.25)" : "scale(1)", transformOrigin: "left center" }}>
+                                        <Avatar url={vm.aAvatar} name={vm.aName} />
+                                      </div>
+                                      <div style={{ fontWeight: 950, fontSize: isHero ? 20 : 15, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{vm.aName}</div>
+                                    </div>
+
+                                    <div style={{ opacity: 0.9, fontWeight: 900, padding: "0 8px", letterSpacing: 1.2, fontSize: isHero ? 16 : 13 }}>VS</div>
+
+                                    <div style={{ display: "flex", alignItems: "center", gap: 12, minWidth: 0 }}>
+                                      <div style={{ transform: isHero ? "scale(1.25)" : "scale(1)", transformOrigin: "left center" }}>
+                                        <Avatar url={vm.bAvatar} name={vm.bName} />
+                                      </div>
+                                      <div style={{ fontWeight: 950, fontSize: isHero ? 20 : 15, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{vm.bName}</div>
+                                    </div>
                                   </div>
 
-                                  <div style={{ opacity: 0.85, fontWeight: 900, padding: "0 6px" }}>VS</div>
-
-                                  <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
-                                    <Avatar url={vm.bAvatar} name={vm.bName} />
-                                    <div style={{ fontWeight: 900, fontSize: 13, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{vm.bName}</div>
+                                  <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: isHero ? 10 : 8 }}>
+                                    <div
+                                      style={{
+                                        padding: isHero ? "9px 12px" : "7px 10px",
+                                        borderRadius: 999,
+                                        background: badgeBg,
+                                        border: `1px solid ${badgeBorder}`,
+                                        fontWeight: 950,
+                                        fontSize: isHero ? 14 : 13,
+                                        letterSpacing: 0.4,
+                                      }}
+                                    >
+                                      {vm.outcome.label}
+                                    </div>
+                                    {vm.when ? <div style={{ opacity: 0.7, fontSize: isHero ? 13 : 12, textAlign: "right" }}>{vm.when}</div> : null}
                                   </div>
                                 </div>
-
-                                <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 6 }}>
-                                  <div
-                                    style={{
-                                      padding: "5px 8px",
-                                      borderRadius: 999,
-                                      background: badgeBg,
-                                      border: `1px solid ${badgeBorder}`,
-                                      fontWeight: 900,
-                                      fontSize: 12,
-                                      letterSpacing: 0.3,
-                                    }}
-                                  >
-                                    {vm.outcome.label}
-                                  </div>
-                                  {vm.when ? <div style={{ opacity: 0.7, fontSize: 11, textAlign: "right" }}>{vm.when}</div> : null}
-                                </div>
-                              </div>
-                            );
-                          })
+                              );
+                            })
                         )}
                       </div>
                     )}

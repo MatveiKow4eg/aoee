@@ -83,3 +83,19 @@ export async function adminCancelChallenge(id: string, notes?: string): Promise<
     body: JSON.stringify({ ...(notes ? { notes } : {}) }),
   });
 }
+
+export type AdminCooldownUser = {
+  id: string;
+  displayName: string | null;
+  email: string | null;
+  role: string;
+  challengeCooldownUntil: string;
+};
+
+export async function adminListCooldownUsers(): Promise<{ users: AdminCooldownUser[] }> {
+  return jsonFetch<{ users: AdminCooldownUser[] }>(`/api/admin/cooldowns`, { method: "GET" });
+}
+
+export async function adminClearCooldown(userId: string): Promise<{ user: Partial<AdminCooldownUser> }> {
+  return jsonFetch<{ user: Partial<AdminCooldownUser> }>(`/api/admin/cooldowns/${encodeURIComponent(userId)}/clear`, { method: "POST" });
+}
