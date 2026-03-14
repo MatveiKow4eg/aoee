@@ -50,7 +50,12 @@ export class ChallengeService {
     return { expiredCount: overdue.length };
   }
 
-  async canChallenge(challengerUserId: string, targetUserId: string, now = new Date()): Promise<CanChallengeResponse> {
+  async canChallenge(
+    challengerUserId: string,
+    targetUserId: string,
+    now = new Date(),
+    opts?: { skipTargetExistenceCheck?: boolean }
+  ): Promise<CanChallengeResponse> {
     // always run expiry first to keep rules consistent
     await this.expireOverdueChallenges(now);
 
@@ -58,13 +63,17 @@ export class ChallengeService {
       return { canChallenge: false, reason: 'SELF_CHALLENGE', cooldownUntil: null, activeChallengeId: null };
     }
 
-    const [challenger, target] = await Promise.all([
-      prisma.user.findUnique({ select: { id: true, challengeCooldownUntil: true }, where: { id: challengerUserId } }),
-      prisma.user.findUnique({ select: { id: true }, where: { id: targetUserId } }),
-    ]);
+    const challenger = await prisma.user.findUnique({
+      select: { id: true, challengeCooldownUntil: true },
+      where: { id: challengerUserId },
+    });
 
-    if (!target) {
-      return { canChallenge: false, reason: 'TARGET_NOT_FOUND', cooldownUntil: null, activeChallengeId: null };
+    // Optional: allow creating challenge placeholders when target is not a user yet.
+    if (!opts?.skipTargetExistenceCheck) {
+      const target = await prisma.user.findUnique({ select: { id: true }, where: { id: targetUserId } });
+      if (!target) {
+        return { canChallenge: false, reason: 'TARGET_NOT_FOUND', cooldownUntil: null, activeChallengeId: null };
+      }
     }
 
     const cooldownUntil = challenger?.challengeCooldownUntil ?? null;
@@ -138,7 +147,7 @@ export class ChallengeService {
 
     // If we resolved a real target user, enforce rules via canChallenge
     if (targetUserId) {
-      const can = await this.canChallenge(challengerUserId, targetUserId, now);
+      const can = await this.canChallenge(challengerUserId, targetUserId, now, { skipTargetExistenceCheck: true });
       if (!can.canChallenge) {
         throw new HttpError(400, can.reason ?? 'CANNOT_CHALLENGE', 'Cannot create challenge', {
           canChallenge: can,
