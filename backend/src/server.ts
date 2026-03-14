@@ -1,7 +1,9 @@
 import { createApp, env } from './app';
 
 const app = createApp();
-app.set('trust proxy', true);
+// Trust only the first reverse proxy (typical for nginx / load balancer setups).
+// This is safer for IP-based rate limiting than `true`.
+app.set('trust proxy', 1);
 
 app.listen(env.PORT, () => {
   console.log(`[backend] listening on http://localhost:${env.PORT}`);
