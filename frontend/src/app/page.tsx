@@ -1131,21 +1131,32 @@ export default function Home() {
                             try {
                               if (isCreatingChallenge) return;
                                     setIsCreatingChallenge(true);
-                              const { createChallenge } = await import('../lib/api/challenges');
+                              const { createChallenge, canChallenge } = await import('../lib/api/challenges');
+
+                              let effectiveTargetUserId = targetUserId;
 
                               if (targetUserId) {
                                 await createChallenge(targetUserId);
                               } else {
                                 const aoe = String(buildingAoeProfileId || '').trim();
-                                if (!aoe) {
-                                  window.alert('TARGET_NOT_FOUND: no targetUserId and no aoeProfileId in payload');
+                                const pk = String(playerId || '').trim();
+                                if (!aoe && !pk) {
+                                  window.alert('TARGET_NOT_FOUND: no targetUserId, no aoeProfileId and no playerKey in payload');
                                   return;
                                 }
-                                await (createChallenge as any)({ targetAoeProfileId: aoe });
+
+                                // Create challenge by map player key (u005) and/or aoeProfileId.
+                                const rr = await (createChallenge as any)({
+                                  targetPlayerKey: pk || undefined,
+                                  targetAoeProfileId: aoe || undefined,
+                                });
+                                effectiveTargetUserId = (rr as any)?.challenge?.targetUserId ? String((rr as any).challenge.targetUserId).trim() : '';
                               }
-                              const { canChallenge } = await import('../lib/api/challenges');
-                              const r = await canChallenge(targetUserId);
-                              setChallengeCheck({ status: 'ok', data: r });
+
+                              if (effectiveTargetUserId) {
+                                const r = await canChallenge(effectiveTargetUserId);
+                                setChallengeCheck({ status: 'ok', data: r });
+                              }
                               window.alert('Вызов отправлен');
                             } catch (e: any) {
                               const code = e?.code ? String(e.code) : 'ERROR';

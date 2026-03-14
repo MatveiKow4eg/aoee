@@ -90,25 +90,78 @@ export class ChallengeService {
     return { canChallenge: true, reason: null, cooldownUntil: null, activeChallengeId: null };
   }
 
-  async createChallenge(challengerUserId: string, targetUserId: string, now = new Date()) {
-    const can = await this.canChallenge(challengerUserId, targetUserId, now);
-    if (!can.canChallenge) {
-      throw new HttpError(400, can.reason ?? 'CANNOT_CHALLENGE', 'Cannot create challenge', {
-        canChallenge: can,
-      });
+  async createChallenge(
+    challengerUserId: string,
+    params:
+      | { targetUserId: string }
+      | { targetAoeProfileId: string; targetPlayerKey?: string | null }
+      | { targetPlayerKey: string },
+    now = new Date()
+  ) {
+    // Resolve target identifiers
+    let targetUserId: string | null = null;
+    let targetAoeProfileId: string | null = null;
+    let targetPlayerKey: string | null = null;
+
+    if ('targetUserId' in params) {
+      targetUserId = String(params.targetUserId).trim();
+    } else if ('targetAoeProfileId' in params) {
+      targetAoeProfileId = String(params.targetAoeProfileId).trim();
+      targetPlayerKey = params.targetPlayerKey ? String(params.targetPlayerKey).trim() : null;
+    } else if ('targetPlayerKey' in params) {
+      targetPlayerKey = String(params.targetPlayerKey).trim();
+    }
+
+    // If only playerKey was provided, try to resolve aoeProfileId from current map payload.
+    if (!targetAoeProfileId && targetPlayerKey) {
+      try {
+        const map = await prisma.mapState.findUnique({ where: { slug: 'default' }, select: { id: true } });
+        if (map) {
+          const mp = await prisma.mapPlayer.findFirst({
+            where: { mapStateId: map.id, playerKey: targetPlayerKey },
+            select: { extraJson: true, name: true },
+          });
+          const extra = (mp?.extraJson ?? {}) as any;
+          const fromExtra = (extra?.aoeProfileId ?? extra?.insightsUserId ?? '').toString().trim();
+          if (fromExtra) targetAoeProfileId = fromExtra;
+        }
+      } catch {
+        // ignore
+      }
+    }
+
+    // If we have aoeProfileId, try to resolve targetUserId via claim.
+    if (!targetUserId && targetAoeProfileId) {
+      const aoe = await prisma.aoePlayer.findUnique({ where: { aoeProfileId: targetAoeProfileId }, select: { claimedByUserId: true } });
+      targetUserId = aoe?.claimedByUserId ? String(aoe.claimedByUserId) : null;
+    }
+
+    // If we resolved a real target user, enforce rules via canChallenge
+    if (targetUserId) {
+      const can = await this.canChallenge(challengerUserId, targetUserId, now);
+      if (!can.canChallenge) {
+        throw new HttpError(400, can.reason ?? 'CANNOT_CHALLENGE', 'Cannot create challenge', {
+          canChallenge: can,
+        });
+      }
     }
 
     const expiresAt = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
 
+    const data: any = {
+      challengerUserId,
+      status: 'ACTIVE',
+      createdAt: now,
+      acceptedAt: now,
+      expiresAt,
+    };
+
+    if (targetUserId) data.targetUserId = targetUserId;
+    if (targetPlayerKey) data.targetPlayerKey = targetPlayerKey;
+    if (targetAoeProfileId) data.targetAoeProfileId = targetAoeProfileId;
+
     const ch = await prisma.userChallenge.create({
-      data: {
-        challengerUserId,
-        targetUserId,
-        status: 'ACTIVE',
-        createdAt: now,
-        acceptedAt: now,
-        expiresAt,
-      },
+      data,
     });
 
     return ch;

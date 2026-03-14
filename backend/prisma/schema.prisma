@@ -157,7 +157,11 @@ model UserChallenge {
   id               String          @id @default(cuid())
 
   challengerUserId String          @map("challenger_user_id")
-  targetUserId     String          @map("target_user_id")
+  targetUserId     String?         @map("target_user_id")
+
+  // Optional target identifiers when the target user is not resolved/claimed yet.
+  targetPlayerKey  String?         @map("target_player_key")
+  targetAoeProfileId String?       @map("target_aoe_profile_id")
 
   status           ChallengeStatus @default(ACTIVE)
   result           ChallengeResult?
@@ -175,11 +179,13 @@ model UserChallenge {
   notes            String?
 
   challengerUser   User            @relation("ChallengeChallenger", fields: [challengerUserId], references: [id], onDelete: Restrict)
-  targetUser       User            @relation("ChallengeTarget", fields: [targetUserId], references: [id], onDelete: Restrict)
+  targetUser       User?           @relation("ChallengeTarget", fields: [targetUserId], references: [id], onDelete: Restrict)
   resolvedByUser   User?           @relation("ChallengeResolvedBy", fields: [resolvedByUserId], references: [id], onDelete: SetNull)
 
   @@index([challengerUserId])
   @@index([targetUserId])
+  @@index([targetPlayerKey])
+  @@index([targetAoeProfileId])
   @@index([status])
   @@index([expiresAt])
   @@map("user_challenges")

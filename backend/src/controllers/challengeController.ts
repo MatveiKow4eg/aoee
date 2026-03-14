@@ -23,24 +23,23 @@ export const postCreateChallenge: RequestHandler = async (req, res, next) => {
     const user = (req as any).user;
     if (!user) throw new HttpError(401, 'UNAUTHORIZED', 'Unauthorized');
 
-    let targetUserId = String((req.body as any)?.targetUserId || '').trim();
+    const targetUserId = String((req.body as any)?.targetUserId || '').trim();
     const targetAoeProfileId = String((req.body as any)?.targetAoeProfileId || '').trim();
+    const targetPlayerKey = String((req.body as any)?.targetPlayerKey || '').trim();
 
-    // Allow creating a challenge by aoeProfileId (map payload has aoeProfileId even when userId is missing).
-    if (!targetUserId && targetAoeProfileId) {
-      const { prisma } = await import('../db/prisma');
-      const row = await prisma.aoePlayer.findUnique({
-        where: { aoeProfileId: targetAoeProfileId },
-        select: { claimedByUserId: true },
-      });
-      const claimed = row?.claimedByUserId ? String(row.claimedByUserId).trim() : '';
-      if (!claimed) throw new HttpError(404, 'TARGET_NOT_FOUND', 'Target is not claimed');
-      targetUserId = claimed;
+    if (!targetUserId && !targetAoeProfileId && !targetPlayerKey) {
+      throw new HttpError(400, 'BAD_REQUEST', 'targetUserId or targetAoeProfileId or targetPlayerKey is required');
     }
 
-    if (!targetUserId) throw new HttpError(400, 'BAD_REQUEST', 'targetUserId or targetAoeProfileId is required');
+    const ch = await challengeService.createChallenge(
+      user.id,
+      targetUserId
+        ? { targetUserId }
+        : targetAoeProfileId
+          ? { targetAoeProfileId, targetPlayerKey: targetPlayerKey || null }
+          : { targetPlayerKey }
+    );
 
-    const ch = await challengeService.createChallenge(user.id, targetUserId);
     res.status(201).json({ challenge: ch });
   } catch (e) {
     next(e);
