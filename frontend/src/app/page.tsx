@@ -51,6 +51,9 @@ type PlayerRec = {
   /** Canonical map player reference to AoePlayer.aoeProfileId */
   aoeProfileId?: string;
 
+  /** Enriched by backend via claim: used to enable challenges */
+  userId?: string;
+
   /** @deprecated legacy */
   insightsUserId?: string;
 };

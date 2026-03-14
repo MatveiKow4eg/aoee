@@ -26,6 +26,8 @@ export type MapStatePayloadV1 = {
       title?: string;
       desc?: string;
       aoeProfileId?: string;
+      /** user id linked via claim (enriched by backend) */
+      userId?: string;
       /** @deprecated legacy; should not be produced by admin/editor */
       insightsUserId?: string;
     }

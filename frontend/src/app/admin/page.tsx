@@ -54,6 +54,9 @@ type PlayerRec = {
    */
   aoeProfileId?: string;
 
+  /** Linked user id (enriched by backend via claim; should not be manually edited) */
+  userId?: string;
+
   /**
    * Optional helper for backend stats sync.
    * If provided, backend can sync stats via World’s Edge profile_name = /steam/<steamId>.
