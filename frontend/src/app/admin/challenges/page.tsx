@@ -30,7 +30,7 @@ export default function AdminChallengesPage() {
     setState({ status: "loading" });
     try {
       const r = await adminListChallenges(t);
-      setState({ status: "ok"; items: (r as any)?.challenges ?? [] } as any);
+      setState({ status: "ok", items: (r as any)?.challenges ?? [] });
     } catch (e: any) {
       setState({ status: "error", message: e?.message ? String(e.message) : "Failed to load" });
     }
