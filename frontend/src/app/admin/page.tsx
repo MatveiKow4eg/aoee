@@ -1291,6 +1291,23 @@ export default function AdminMapPage() {
         >
           Reset
         </button>
+
+        <button
+          onClick={() => router.push("/admin/challenges")}
+          style={{
+            appearance: "none",
+            border: "1px solid rgba(255,255,255,0.25)",
+            background: "rgba(0,0,0,0.35)",
+            color: "rgba(255,255,255,0.95)",
+            fontWeight: 900,
+            borderRadius: 10,
+            padding: "8px 12px",
+            cursor: "pointer",
+          }}
+          title="Открыть управление вызовами"
+        >
+          Challenges
+        </button>
       </div>
 
       {/* Admin bottom-right controls */}

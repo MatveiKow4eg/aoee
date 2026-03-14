@@ -140,8 +140,8 @@ export class ChallengeService {
       where: filter.status ? { status: filter.status } : undefined,
       orderBy: { createdAt: 'desc' },
       include: {
-        challengerUser: { select: { id: true, displayName: true } },
-        targetUser: { select: { id: true, displayName: true } },
+        challengerUser: { select: { id: true, displayName: true, email: true } },
+        targetUser: { select: { id: true, displayName: true, email: true } },
         resolvedByUser: { select: { id: true, displayName: true } },
       },
     });

@@ -1,8 +1,10 @@
 import type { RequestHandler } from 'express';
 import { ChallengeService, ChallengeResult, ChallengeStatus } from '../services/challengeService';
 import { HttpError } from '../utils/httpError';
+import { MapService } from '../services/mapService';
 
 const challengeService = new ChallengeService();
+const mapService = new MapService();
 
 function requireAdmin(req: any) {
   const user = req?.user;
@@ -21,7 +23,32 @@ export const getAdminChallenges: RequestHandler = async (req, res, next) => {
       status: (status ? (status as ChallengeStatus) : undefined) as any,
     });
 
-    res.json({ challenges: list });
+    // Enrich with map player keys (u001/u003/...) so frontend can use /people/{key}.png
+    let userIdToPlayerKey = new Map<string, string>();
+    try {
+      const payload = await mapService.getMapPayload('default');
+      const players = ((payload as any)?.players ?? {}) as Record<string, any>;
+      for (const [playerKey, rec] of Object.entries(players)) {
+        const uid = (rec as any)?.userId;
+        if (typeof uid === 'string' && uid.trim()) {
+          userIdToPlayerKey.set(uid.trim(), String(playerKey));
+        }
+      }
+    } catch {
+      // ignore - map payload might be missing
+    }
+
+    const enriched = (list ?? []).map((ch: any) => {
+      const challengerPlayerKey = userIdToPlayerKey.get(String(ch?.challengerUserId || '').trim()) ?? null;
+      const targetPlayerKey = userIdToPlayerKey.get(String(ch?.targetUserId || '').trim()) ?? null;
+      return {
+        ...ch,
+        challengerPlayerKey,
+        targetPlayerKey,
+      };
+    });
+
+    res.json({ challenges: enriched });
   } catch (e) {
     next(e);
   }

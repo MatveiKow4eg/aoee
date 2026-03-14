@@ -68,6 +68,13 @@ export default function PlayerHud({ nickname, title, tierLabel, avatarUrl, build
   const [collapsed, setCollapsed] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [statsOpen, setStatsOpen] = useState(false);
+  const [historyModalOpen, setHistoryModalOpen] = useState(false);
+  const [historyState, setHistoryState] = useState<
+    | { status: "idle" }
+    | { status: "loading" }
+    | { status: "ok"; challenges: any[] }
+    | { status: "error"; message: string }
+  >({ status: "idle" });
 
   // Tools panel (search/filter/history)
   const [toolsOpen, setToolsOpen] = useState<{ search: boolean; filter: boolean; history: boolean }>({
@@ -76,6 +83,7 @@ export default function PlayerHud({ nickname, title, tierLabel, avatarUrl, build
     history: false,
   });
   const [searchQuery, setSearchQuery] = useState("");
+  const [historySeed, setHistorySeed] = useState(0);
   const [filterGroups, setFilterGroups] = useState<Record<string, boolean>>({
     "Замки": true,
     "Крепости": true,
@@ -83,7 +91,118 @@ export default function PlayerHud({ nickname, title, tierLabel, avatarUrl, build
     "Башня": true,
     "Халупа": true,
   });
-  const [historyList, setHistoryList] = useState<string[]>([]);
+  // History modal: shows ALL challenges (admin endpoint)
+  const openHistoryModal = async () => {
+    setHistoryModalOpen(true);
+    setHistoryState({ status: "loading" });
+    try {
+      const { adminListChallenges } = await import("../../lib/api/challenges");
+      const r = await adminListChallenges();
+      const list = (r as any)?.challenges ?? [];
+      setHistoryState({ status: "ok", challenges: Array.isArray(list) ? list : [] });
+    } catch (e: any) {
+      setHistoryState({ status: "error", message: e?.message ? String(e.message) : "Failed to load history" });
+    }
+  };
+
+  const avatarUrlByMapKey = (key: any) => {
+    const k = typeof key === "string" ? key.trim() : "";
+    if (!k) return null;
+    return `/people/${encodeURIComponent(k)}.png`;
+  };
+
+  const avatarFromUser = (u: any, userIdFallback: string | null) => {
+    // Prefer explicit avatar if backend provides it.
+    const explicit = typeof u?.avatarUrl === "string" ? u.avatarUrl.trim() : "";
+    if (explicit) return explicit;
+
+    // Fallback: derive from user id as uXXX (legacy). Prefer using challengerPlayerKey/targetPlayerKey instead.
+    const rawId = (typeof u?.id === "string" && u.id.trim()) ? u.id.trim() : (userIdFallback ? String(userIdFallback).trim() : "");
+    if (!rawId) return null;
+
+    const digits = rawId.replace(/\D+/g, "");
+    if (!digits) return null;
+
+    const n = parseInt(digits.slice(0, 3), 10);
+    if (!Number.isFinite(n) || n <= 0) return null;
+
+    const code = `u${String(n).padStart(3, "0")}`;
+    return `/people/${encodeURIComponent(code)}.png`;
+  };
+
+  const challengeVm = (ch: any) => {
+    const challenger = ch?.challengerUser ?? null;
+    const target = ch?.targetUser ?? null;
+
+    const aName = challenger?.displayName ?? ch?.challengerUserId ?? "?";
+    const bName = target?.displayName ?? ch?.targetUserId ?? "?";
+
+    const aAvatar = avatarUrlByMapKey(ch?.challengerPlayerKey) ?? avatarFromUser(challenger, ch?.challengerUserId ?? null);
+    const bAvatar = avatarUrlByMapKey(ch?.targetPlayerKey) ?? avatarFromUser(target, ch?.targetUserId ?? null);
+
+    const status = String(ch?.status || "").toUpperCase();
+    const result = String(ch?.result || "").toUpperCase();
+
+    const outcome =
+      status === "ACTIVE"
+        ? { label: "Ожидание", tone: "pending" as const }
+        : status === "COMPLETED"
+          ? result === "CHALLENGER_WON"
+            ? { label: "Win", tone: "win" as const }
+            : result === "CHALLENGER_LOST"
+              ? { label: "Loss", tone: "loss" as const }
+              : { label: result ? result.toLowerCase() : "Completed", tone: "neutral" as const }
+          : { label: status ? status.toLowerCase() : "—", tone: "neutral" as const };
+
+    const ts = ch?.createdAt ? String(ch.createdAt) : "";
+    const when = ts
+      ? (() => {
+          try {
+            return new Date(ts).toLocaleString();
+          } catch {
+            return ts;
+          }
+        })()
+      : "";
+
+    return { aName, bName, aAvatar, bAvatar, outcome, when };
+  };
+
+  const Avatar = ({ url, name }: { url: string | null; name: string }) => {
+    const initial = (name || "?").trim().slice(0, 1).toUpperCase();
+    return (
+      <div
+        title={name}
+        style={{
+          width: 40,
+          height: 40,
+          borderRadius: 999,
+          border: "1px solid rgba(202,162,77,0.55)",
+          overflow: "hidden",
+          background: "rgba(255,255,255,0.06)",
+          display: "grid",
+          placeItems: "center",
+          color: "rgba(247,240,223,0.92)",
+          fontWeight: 900,
+        }}
+      >
+        {url ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img src={url} alt={name} style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }} />
+        ) : (
+          <span>{initial}</span>
+        )}
+      </div>
+    );
+  };
+
+  const fmtTime = (ts: number) => {
+    try {
+      return new Date(ts).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+    } catch {
+      return "";
+    }
+  };
 
   const searchSuggestions = useMemo(() => {
     const q = (searchQuery ?? "").toString().trim().toLocaleLowerCase("ru");
@@ -177,6 +296,9 @@ export default function PlayerHud({ nickname, title, tierLabel, avatarUrl, build
   }, [collapsed]);
 
   const toggle = () => setCollapsed((v) => !v);
+
+  // History should only contain "calls" ("вызовы").
+  // NOTE: this local history is temporary for debug. Real history should be loaded from backend (DB).
 
   useEffect(() => {
     if (!settingsOpen && !statsOpen) return;
@@ -403,7 +525,7 @@ export default function PlayerHud({ nickname, title, tierLabel, avatarUrl, build
               title="История"
               onClick={(e) => {
                 e.stopPropagation();
-                setToolsOpen((s) => ({ ...s, history: !s.history, search: false, filter: false }));
+                openHistoryModal();
               }}
               style={{
                 cursor: "pointer",
@@ -514,7 +636,9 @@ export default function PlayerHud({ nickname, title, tierLabel, avatarUrl, build
                         type="button"
                         onClick={() => {
                           setSearchQuery(sug.label);
-                          setHistoryList((h) => [sug.label, ...h].slice(0, 10));
+                          pushHistory(`Поиск: ${sug.label}`);
+                          setToolsOpen((s) => ({ ...s, history: true, search: false, filter: false }));
+                          setHistorySeed((x) => x + 1);
                           onSearchNicknames?.(sug.label);
                           setToolsOpen((st) => ({ ...st, search: false }));
                         }}
@@ -552,7 +676,9 @@ export default function PlayerHud({ nickname, title, tierLabel, avatarUrl, build
                     onClick={() => {
                       const q = searchQuery.trim();
                       if (q) {
-                        setHistoryList((h) => [q, ...h].slice(0, 10));
+                        pushHistory(`Поиск: ${q}`);
+                        setToolsOpen((s) => ({ ...s, history: true, search: false, filter: false }));
+                        setHistorySeed((x) => x + 1);
                         onSearchNicknames?.(q);
                       }
                       setToolsOpen((s) => ({ ...s, search: false }));
@@ -616,6 +742,12 @@ export default function PlayerHud({ nickname, title, tierLabel, avatarUrl, build
                             setFilterGroups((prev) => {
                               const next = { ...prev, [k]: !prev[k] };
                               onFilterGroupsChange?.(next);
+                          pushHistory(`Фильтр: ${Object.entries(next)
+                            .filter(([, v]) => !!v)
+                            .map(([k]) => k)
+                            .join(", ") || "ничего"}`);
+                              setToolsOpen((s) => ({ ...s, history: true, search: false, filter: false }));
+                              setHistorySeed((x) => x + 1);
                               return next;
                             });
                           }}
@@ -639,6 +771,9 @@ export default function PlayerHud({ nickname, title, tierLabel, avatarUrl, build
                       };
                       setFilterGroups(next);
                       onFilterGroupsChange?.(next);
+                      pushHistory(`Фильтр: Замки, Крепости, Донжоны, Башня, Халупа`);
+                      setToolsOpen((s) => ({ ...s, history: true, search: false, filter: false }));
+                      setHistorySeed((x) => x + 1);
                     }}
                     style={{
                       padding: "8px 10px",
@@ -658,6 +793,9 @@ export default function PlayerHud({ nickname, title, tierLabel, avatarUrl, build
                     type="button"
                     onClick={() => {
                       onFilterGroupsChange?.(filterGroups);
+                      pushHistory(`Фильтр применён`);
+                      setToolsOpen((s) => ({ ...s, history: true, search: false, filter: false }));
+                      setHistorySeed((x) => x + 1);
                       setToolsOpen((s) => ({ ...s, filter: false }));
                     }}
                     style={{
@@ -676,73 +814,140 @@ export default function PlayerHud({ nickname, title, tierLabel, avatarUrl, build
               </div>
             )}
 
-            {toolsOpen.history && (
-              <div
-                onPointerDown={(e) => e.stopPropagation()}
-                style={{
-                  position: "absolute",
-                  right: "calc(100% + 8px)",
-                  top: 0,
-                  width: 280,
-                  maxHeight: 220,
-                  overflow: "auto",
-                  padding: 10,
-                  borderRadius: 12,
-                  border: "1px solid rgba(202,162,77,0.55)",
-                  background: "rgba(20,14,10,0.96)",
-                  boxShadow: "0 18px 44px rgba(0,0,0,0.70)",
-                  color: "#f7f0df",
-                  display: "flex",
-                  flexDirection: "column",
-                  gap: 8,
-                }}
-              >
-                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
-                  <div style={{ fontWeight: 900, fontSize: 12, letterSpacing: 0.6, textTransform: "uppercase", opacity: 0.92 }}>История</div>
-                  <button
-                    type="button"
-                    onClick={() => setToolsOpen((s) => ({ ...s, history: false }))}
-                    style={{ background: "transparent", border: 0, color: "rgba(247,240,223,0.9)", cursor: "pointer", fontSize: 16, lineHeight: 1 }}
-                    aria-label="Close"
-                    title="Close"
+                      {historyModalOpen &&
+              typeof document !== "undefined" &&
+              createPortal(
+                <>
+                  <div
+                    onPointerDown={(e) => {
+                      e.stopPropagation();
+                      setHistoryModalOpen(false);
+                    }}
+                    style={{
+                      position: "fixed",
+                      inset: 0,
+                      zIndex: 100010,
+                      pointerEvents: "auto",
+                      background: "rgba(0,0,0,0.45)",
+                    }}
+                  />
+                  <div
+                    onPointerDown={(e) => e.stopPropagation()}
+                    style={{
+                      position: "fixed",
+                      left: "50%",
+                      top: "50%",
+                      transform: "translate(-50%, -50%)",
+                      width: "min(720px, calc(100vw - 32px))",
+                      maxHeight: "min(520px, calc(100vh - 32px))",
+                      overflow: "auto",
+                      padding: 14,
+                      borderRadius: 12,
+                      border: "1px solid rgba(202,162,77,0.65)",
+                      background: "rgba(20, 14, 10, 0.97)",
+                      boxShadow: "0 18px 44px rgba(0,0,0,0.70)",
+                      color: "#f7f0df",
+                      zIndex: 100011,
+                      pointerEvents: "auto",
+                    }}
                   >
-                    ×
-                  </button>
-                </div>
-                {historyList.length === 0 ? (
-                  <div style={{ opacity: 0.8, fontSize: 12 }}>Пусто</div>
-                ) : (
-                  <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                    {historyList.map((h, i) => (
-                      <div
-                        key={`${h}-${i}`}
-                        style={{
-                          display: "flex",
-                          alignItems: "center",
-                          justifyContent: "space-between",
-                          gap: 8,
-                          padding: 6,
-                          borderRadius: 8,
-                          background: "rgba(255,255,255,0.06)",
-                          border: "1px solid rgba(255,255,255,0.10)",
-                        }}
+                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, marginBottom: 10 }}>
+                      <div style={{ fontWeight: 900, fontSize: 12, letterSpacing: 0.6, textTransform: "uppercase", opacity: 0.92 }}>История вызовов</div>
+                      <button
+                        type="button"
+                        onClick={() => setHistoryModalOpen(false)}
+                        style={{ background: "transparent", border: 0, color: "rgba(247,240,223,0.9)", cursor: "pointer", fontSize: 16, lineHeight: 1 }}
+                        aria-label="Close"
+                        title="Close"
                       >
-                        <div style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{h}</div>
-                        <button
-                          type="button"
-                          onClick={() => setHistoryList((list) => list.filter((_, idx) => idx !== i))}
-                          title="Удалить"
-                          aria-label="Удалить"
-                          style={{ background: "transparent", border: 0, color: "rgba(247,240,223,0.9)", cursor: "pointer", fontSize: 14 }}
-                        >
-                          ✕
-                        </button>
+                        ×
+                      </button>
+                    </div>
+
+                    {historyState.status === "loading" && <div style={{ opacity: 0.9, lineHeight: 1.4 }}>Загрузка…</div>}
+
+                    {historyState.status === "error" && <div style={{ opacity: 0.9, lineHeight: 1.4 }}>{historyState.message}</div>}
+
+                    {historyState.status === "ok" && (
+                      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                        {historyState.challenges.length === 0 ? (
+                          <div style={{ opacity: 0.8, fontSize: 12 }}>Пусто</div>
+                        ) : (
+                          historyState.challenges.map((ch, idx) => {
+                            const vm = challengeVm(ch);
+                            const badgeBg =
+                              vm.outcome.tone === "win"
+                                ? "rgba(43,187,115,0.18)"
+                                : vm.outcome.tone === "loss"
+                                  ? "rgba(232,76,61,0.18)"
+                                  : vm.outcome.tone === "pending"
+                                    ? "rgba(202,162,77,0.16)"
+                                    : "rgba(255,255,255,0.08)";
+                            const badgeBorder =
+                              vm.outcome.tone === "win"
+                                ? "rgba(43,187,115,0.55)"
+                                : vm.outcome.tone === "loss"
+                                  ? "rgba(232,76,61,0.55)"
+                                  : vm.outcome.tone === "pending"
+                                    ? "rgba(202,162,77,0.55)"
+                                    : "rgba(255,255,255,0.16)";
+
+                            return (
+                              <div
+                                key={String(ch?.id || idx)}
+                                style={{
+                                  padding: 10,
+                                  borderRadius: 12,
+                                  background: "rgba(255,255,255,0.06)",
+                                  border: "1px solid rgba(255,255,255,0.10)",
+                                  display: "grid",
+                                  gridTemplateColumns: "1fr auto",
+                                  gap: 10,
+                                  alignItems: "center",
+                                }}
+                                title={String(ch?.id || "")}
+                              >
+                                <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0 }}>
+                                  <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
+                                    <Avatar url={vm.aAvatar} name={vm.aName} />
+                                    <div style={{ fontWeight: 900, fontSize: 13, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{vm.aName}</div>
+                                  </div>
+
+                                  <div style={{ opacity: 0.85, fontWeight: 900, padding: "0 6px" }}>VS</div>
+
+                                  <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
+                                    <Avatar url={vm.bAvatar} name={vm.bName} />
+                                    <div style={{ fontWeight: 900, fontSize: 13, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{vm.bName}</div>
+                                  </div>
+                                </div>
+
+                                <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 6 }}>
+                                  <div
+                                    style={{
+                                      padding: "5px 8px",
+                                      borderRadius: 999,
+                                      background: badgeBg,
+                                      border: `1px solid ${badgeBorder}`,
+                                      fontWeight: 900,
+                                      fontSize: 12,
+                                      letterSpacing: 0.3,
+                                    }}
+                                  >
+                                    {vm.outcome.label}
+                                  </div>
+                                  {vm.when ? <div style={{ opacity: 0.7, fontSize: 11, textAlign: "right" }}>{vm.when}</div> : null}
+                                </div>
+                              </div>
+                            );
+                          })
+                        )}
                       </div>
-                    ))}
+                    )}
                   </div>
-                )}
-              </div>
-            )}
+                </>,
+                document.body
+              )}
+
           </div>,
           document.body
         )}
