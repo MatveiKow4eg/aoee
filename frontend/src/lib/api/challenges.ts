@@ -61,6 +61,13 @@ export async function createChallenge(targetUserId: string): Promise<{ challenge
   });
 }
 
+export async function createChallengeByAoeProfileId(targetAoeProfileId: string): Promise<{ challenge: Challenge }> {
+  return jsonFetch<{ challenge: Challenge }>(`/api/challenges`, {
+    method: "POST",
+    body: JSON.stringify({ targetAoeProfileId }),
+  });
+}
+
 export async function listMyChallenges(): Promise<{ challenges: Challenge[] }> {
   return jsonFetch<{ challenges: Challenge[] }>(`/api/challenges/my`, { method: "GET" });
 }

@@ -1121,19 +1121,36 @@ export default function Home() {
                   </div>
 
                   <div style={{ display: "flex", gap: 10, flexWrap: "wrap", justifyContent: "center" }}>
-                    {/* Challenge button (only for чужое строение) */}
-                    {targetUserId && !isSelf && (
+                    {/* Challenge button (debug-friendly): always show for чужое строение.
+                        If we cannot resolve targetUserId from map payload, we will still show the button and display a clear error.
+                    */}
+                    {!isSelf && (
                       <div style={{ display: 'flex', flexDirection: 'column', gap: 6, alignItems: 'center' }}>
                         <button
                           onClick={async () => {
                             try {
                               if (isCreatingChallenge) return;
+
                               setIsCreatingChallenge(true);
-                              const { createChallenge } = await import('../lib/api/challenges');
-                              await createChallenge(targetUserId);
-                              const { canChallenge } = await import('../lib/api/challenges');
-                              const r = await canChallenge(targetUserId);
-                              setChallengeCheck({ status: 'ok', data: r });
+                              const { createChallenge, createChallengeByAoeProfileId, canChallenge } = await import('../lib/api/challenges');
+
+                              let effectiveTargetUserId = targetUserId;
+                              if (targetUserId) {
+                                await createChallenge(targetUserId);
+                              } else {
+                                const aoe = String(buildingAoeProfileId || '').trim();
+                                if (!aoe) {
+                                  window.alert('TARGET_NOT_FOUND: no targetUserId and no aoeProfileId in payload');
+                                  return;
+                                }
+                                const rr = await createChallengeByAoeProfileId(aoe);
+                                effectiveTargetUserId = (rr as any)?.challenge?.targetUserId ? String((rr as any).challenge.targetUserId).trim() : '';
+                              }
+
+                              if (effectiveTargetUserId) {
+                                const r = await canChallenge(effectiveTargetUserId);
+                                setChallengeCheck({ status: 'ok', data: r });
+                              }
                               window.alert('Вызов отправлен');
                             } catch (e: any) {
                               const code = e?.code ? String(e.code) : 'ERROR';
@@ -1145,6 +1162,7 @@ export default function Home() {
                           }}
                           disabled={
                             isCreatingChallenge ||
+                            !targetUserId ||
                             (challengeCheck.status === 'ok' && (challengeCheck as any).data?.canChallenge === false)
                           }
                           style={{
@@ -1152,15 +1170,18 @@ export default function Home() {
                             borderRadius: 10,
                             border: '1px solid #caa24d',
                             background:
-                              challengeCheck.status === 'ok' && (challengeCheck as any).data?.canChallenge === false
+                              !targetUserId ||
+                              (challengeCheck.status === 'ok' && (challengeCheck as any).data?.canChallenge === false)
                                 ? 'rgba(255,255,255,0.06)'
                                 : '#caa24d',
                             color:
-                              challengeCheck.status === 'ok' && (challengeCheck as any).data?.canChallenge === false
+                              !targetUserId ||
+                              (challengeCheck.status === 'ok' && (challengeCheck as any).data?.canChallenge === false)
                                 ? '#f7f0df'
                                 : '#1b1b1b',
                             cursor:
                               isCreatingChallenge ||
+                              !targetUserId ||
                               (challengeCheck.status === 'ok' && (challengeCheck as any).data?.canChallenge === false)
                                 ? 'not-allowed'
                                 : 'pointer',
@@ -1169,14 +1190,22 @@ export default function Home() {
                           }}
                           title='Бросить вызов'
                         >
-                          {challengeCheck.status === 'loading'
-                            ? 'Проверка…'
-                            : challengeCheck.status === 'ok' && (challengeCheck as any).data?.canChallenge === false
-                              ? 'Вызов недоступен'
-                              : 'Бросить вызов'}
+                          {!targetUserId
+                            ? 'Бросить вызов (нет userId)'
+                            : challengeCheck.status === 'loading'
+                              ? 'Проверка…'
+                              : challengeCheck.status === 'ok' && (challengeCheck as any).data?.canChallenge === false
+                                ? 'Вызов недоступен'
+                                : 'Бросить вызов'}
                         </button>
 
-                        {challengeCheck.status === 'ok' && (challengeCheck as any).data?.canChallenge === false && (
+                        {(!targetUserId) && (
+                          <div style={{ fontSize: 12, opacity: 0.85, textAlign: 'center', maxWidth: 340 }}>
+                            Нет targetUserId в payload карты для этой цели. Нужно, чтобы игрок был заклеймен (claim) и /api/maps/default отдавал players[uXXX].userId.
+                          </div>
+                        )}
+
+                        {targetUserId && challengeCheck.status === 'ok' && (challengeCheck as any).data?.canChallenge === false && (
                           <div style={{ fontSize: 12, opacity: 0.85, textAlign: 'center', maxWidth: 340 }}>
                             {(() => {
                               const d = (challengeCheck as any).data || {};
