@@ -71,8 +71,21 @@ const mergeUserIdsIntoMapPlayers = async (players: Record<string, any> | null | 
   });
   const userByProfileId = new Map(rows.filter((r) => r.claimedByUserId).map((r) => [r.aoeProfileId, r.claimedByUserId!]));
 
-  // If no claims exist, keep payload unchanged.
-  if (userByProfileId.size === 0) return src;
+  // If no claims exist, still drop any userId fields from payload to avoid stale/incorrect values.
+  // (Challenges rely on userId being accurate.)
+  if (userByProfileId.size === 0) {
+    let changed = false;
+    const next: Record<string, any> = { ...src };
+    for (const it of withAoe) {
+      const cur = next[it.playerKey] ?? {};
+      if ((cur?.userId ?? '').toString().trim()) {
+        const { userId: _drop, ...rest } = cur;
+        next[it.playerKey] = rest;
+        changed = true;
+      }
+    }
+    return changed ? next : src;
+  }
 
   let changed = false;
   const next: Record<string, any> = { ...src };

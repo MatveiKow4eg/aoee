@@ -1130,11 +1130,9 @@ export default function Home() {
                           onClick={async () => {
                             try {
                               if (isCreatingChallenge) return;
+                                    setIsCreatingChallenge(true);
+                              const { createChallenge } = await import('../lib/api/challenges');
 
-                              setIsCreatingChallenge(true);
-                              const { createChallenge, createChallengeByAoeProfileId, canChallenge } = await import('../lib/api/challenges');
-
-                              let effectiveTargetUserId = targetUserId;
                               if (targetUserId) {
                                 await createChallenge(targetUserId);
                               } else {
@@ -1143,14 +1141,11 @@ export default function Home() {
                                   window.alert('TARGET_NOT_FOUND: no targetUserId and no aoeProfileId in payload');
                                   return;
                                 }
-                                const rr = await createChallengeByAoeProfileId(aoe);
-                                effectiveTargetUserId = (rr as any)?.challenge?.targetUserId ? String((rr as any).challenge.targetUserId).trim() : '';
+                                await (createChallenge as any)({ targetAoeProfileId: aoe });
                               }
-
-                              if (effectiveTargetUserId) {
-                                const r = await canChallenge(effectiveTargetUserId);
-                                setChallengeCheck({ status: 'ok', data: r });
-                              }
+                              const { canChallenge } = await import('../lib/api/challenges');
+                              const r = await canChallenge(targetUserId);
+                              setChallengeCheck({ status: 'ok', data: r });
                               window.alert('Вызов отправлен');
                             } catch (e: any) {
                               const code = e?.code ? String(e.code) : 'ERROR';
@@ -1162,7 +1157,7 @@ export default function Home() {
                           }}
                           disabled={
                             isCreatingChallenge ||
-                            !targetUserId ||
+                            (!targetUserId && !String(buildingAoeProfileId || '').trim()) ||
                             (challengeCheck.status === 'ok' && (challengeCheck as any).data?.canChallenge === false)
                           }
                           style={{
@@ -1191,7 +1186,7 @@ export default function Home() {
                           title='Бросить вызов'
                         >
                           {!targetUserId
-                            ? 'Бросить вызов (нет userId)'
+                            ? (String(buildingAoeProfileId || '').trim() ? 'Бросить вызов (по aoeProfileId)' : 'Бросить вызов (нет userId)')
                             : challengeCheck.status === 'loading'
                               ? 'Проверка…'
                               : challengeCheck.status === 'ok' && (challengeCheck as any).data?.canChallenge === false
@@ -1201,7 +1196,9 @@ export default function Home() {
 
                         {(!targetUserId) && (
                           <div style={{ fontSize: 12, opacity: 0.85, textAlign: 'center', maxWidth: 340 }}>
-                            Нет targetUserId в payload карты для этой цели. Нужно, чтобы игрок был заклеймен (claim) и /api/maps/default отдавал players[uXXX].userId.
+                            {String(buildingAoeProfileId || '').trim()
+                              ? 'В payload нет userId, поэтому вызов пойдёт по aoeProfileId. Если профиль не заклеймен — будет ошибка TARGET_NOT_FOUND.'
+                              : 'Нет targetUserId и нет aoeProfileId в payload карты для этой цели.'}
                           </div>
                         )}
 
