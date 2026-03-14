@@ -1,4 +1,6 @@
-const API_ORIGIN = process.env.NEXT_PUBLIC_API_ORIGIN || "";
+// Prefer the explicit API base URL used by the app (.env.local/.env on Vercel)
+// Example: https://api.aoeestonia.ee
+const API_ORIGIN = process.env.NEXT_PUBLIC_API_BASE_URL || process.env.NEXT_PUBLIC_API_ORIGIN || "";
 
 async function jsonFetch<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${API_ORIGIN}${path}`, {
