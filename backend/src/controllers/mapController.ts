@@ -49,16 +49,19 @@ const mergeSteamIdsIntoMapPlayers = async (players: Record<string, any> | null |
 
 const mergeUserIdsIntoMapPlayers = async (players: Record<string, any> | null | undefined) => {
   const src = (players ?? {}) as Record<string, any>;
+
   const items = Object.entries(src).map(([playerKey, p]) => {
     const aoeProfileId = (p?.aoeProfileId ?? p?.insightsUserId ?? '').toString().trim();
     const userId = (p?.userId ?? '').toString().trim();
     return { playerKey, aoeProfileId, userId };
   });
 
-  const missing = items.filter((it) => it.aoeProfileId && !it.userId);
-  if (missing.length === 0) return src;
+  // Always try to resolve userId by claim, even if payload already has some value.
+  // This makes challenges available as soon as a player is claimed and also fixes stale/incorrect userId fields.
+  const withAoe = items.filter((it) => it.aoeProfileId);
+  if (withAoe.length === 0) return src;
 
-  const aoeProfileIds = Array.from(new Set(missing.map((m) => m.aoeProfileId)));
+  const aoeProfileIds = Array.from(new Set(withAoe.map((m) => m.aoeProfileId)));
   if (aoeProfileIds.length === 0) return src;
 
   // AoePlayer.claimedByUserId is unique: that's our owner link.
@@ -68,17 +71,34 @@ const mergeUserIdsIntoMapPlayers = async (players: Record<string, any> | null | 
   });
   const userByProfileId = new Map(rows.filter((r) => r.claimedByUserId).map((r) => [r.aoeProfileId, r.claimedByUserId!]));
 
+  // If no claims exist, keep payload unchanged.
   if (userByProfileId.size === 0) return src;
 
+  let changed = false;
   const next: Record<string, any> = { ...src };
-  for (const it of missing) {
-    const uid = userByProfileId.get(it.aoeProfileId);
-    if (!uid) continue;
+
+  for (const it of withAoe) {
+    const claimedUid = userByProfileId.get(it.aoeProfileId) ?? null;
     const cur = next[it.playerKey] ?? {};
-    next[it.playerKey] = { ...cur, userId: uid };
+
+    // If claimed, set/overwrite userId.
+    if (claimedUid) {
+      if ((cur?.userId ?? '').toString().trim() !== claimedUid) {
+        next[it.playerKey] = { ...cur, userId: claimedUid };
+        changed = true;
+      }
+      continue;
+    }
+
+    // If not claimed anymore, remove stale userId (optional but keeps data consistent).
+    if ((cur?.userId ?? '').toString().trim()) {
+      const { userId: _drop, ...rest } = cur;
+      next[it.playerKey] = rest;
+      changed = true;
+    }
   }
 
-  return next;
+  return changed ? next : src;
 };
 
 export const getMapDefault: RequestHandler = async (_req, res, next) => {
