@@ -24,14 +24,16 @@ export const getAdminChallenges: RequestHandler = async (req, res, next) => {
     });
 
     // Enrich with map player keys (u001/u003/...) so frontend can use /people/{key}.png
+    // Map payload can have userId nested under the player record OR under extraJson (older shapes).
     let userIdToPlayerKey = new Map<string, string>();
     try {
       const payload = await mapService.getMapPayload('default');
       const players = ((payload as any)?.players ?? {}) as Record<string, any>;
       for (const [playerKey, rec] of Object.entries(players)) {
-        const uid = (rec as any)?.userId;
-        if (typeof uid === 'string' && uid.trim()) {
-          userIdToPlayerKey.set(uid.trim(), String(playerKey));
+        const uidRaw = (rec as any)?.userId ?? (rec as any)?.extraJson?.userId ?? (rec as any)?.extra?.userId ?? null;
+        const uid = typeof uidRaw === 'string' ? uidRaw.trim() : '';
+        if (uid) {
+          userIdToPlayerKey.set(uid, String(playerKey));
         }
       }
     } catch {
