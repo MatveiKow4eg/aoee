@@ -113,7 +113,14 @@ export class ChallengeService {
     let targetPlayerKey: string | null = null;
 
     if ('targetUserId' in params) {
-      targetUserId = String(params.targetUserId).trim();
+      // If an explicit targetUserId is provided but doesn't exist,
+      // we must NOT attempt to write it (will violate FK).
+      // Instead, treat it as an unresolved target and rely on optional identifiers.
+      const raw = String(params.targetUserId).trim();
+      if (raw) {
+        const exists = await prisma.user.findUnique({ where: { id: raw }, select: { id: true } });
+        targetUserId = exists ? raw : null;
+      }
     } else if ('targetAoeProfileId' in params) {
       targetAoeProfileId = String(params.targetAoeProfileId).trim();
       targetPlayerKey = params.targetPlayerKey ? String(params.targetPlayerKey).trim() : null;
