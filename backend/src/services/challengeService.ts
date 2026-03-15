@@ -128,6 +128,12 @@ export class ChallengeService {
       targetPlayerKey = String(params.targetPlayerKey).trim();
     }
 
+    // If caller passed something but we couldn't resolve any identifiers,
+    // refuse to create a "blank" challenge that can't be displayed/handled.
+    if (!targetUserId && !targetAoeProfileId && !targetPlayerKey) {
+      throw new HttpError(400, 'TARGET_NOT_RESOLVED', 'Target could not be resolved; pass targetPlayerKey or targetAoeProfileId');
+    }
+
     // If only playerKey was provided, try to resolve aoeProfileId from current map payload.
     if (!targetAoeProfileId && targetPlayerKey) {
       try {
