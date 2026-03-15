@@ -27,7 +27,15 @@ export const postCreateChallenge: RequestHandler = async (req, res, next) => {
     const targetAoeProfileId = String((req.body as any)?.targetAoeProfileId || '').trim();
     const targetPlayerKey = String((req.body as any)?.targetPlayerKey || '').trim();
 
-    if (!targetUserId && !targetAoeProfileId && !targetPlayerKey) {
+    // Accept legacy/alias field names from frontend
+    // so the UI can send e.g. { playerKey: 'u005' } or { aoeProfileId: '12550310' }.
+    const aliasPlayerKey = String((req.body as any)?.playerKey || '').trim();
+    const aliasAoeProfileId = String((req.body as any)?.aoeProfileId || '').trim();
+
+    const finalTargetPlayerKey = targetPlayerKey || aliasPlayerKey;
+    const finalTargetAoeProfileId = targetAoeProfileId || aliasAoeProfileId;
+
+    if (!targetUserId && !finalTargetAoeProfileId && !finalTargetPlayerKey) {
       throw new HttpError(400, 'BAD_REQUEST', 'targetUserId or targetAoeProfileId or targetPlayerKey is required');
     }
 
@@ -35,9 +43,9 @@ export const postCreateChallenge: RequestHandler = async (req, res, next) => {
       user.id,
       targetUserId
         ? { targetUserId }
-        : targetAoeProfileId
-          ? { targetAoeProfileId, targetPlayerKey: targetPlayerKey || null }
-          : { targetPlayerKey }
+        : finalTargetAoeProfileId
+          ? { targetAoeProfileId: finalTargetAoeProfileId, targetPlayerKey: finalTargetPlayerKey || null }
+          : { targetPlayerKey: finalTargetPlayerKey }
     );
 
     res.status(201).json({ challenge: ch });
