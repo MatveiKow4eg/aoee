@@ -9,7 +9,7 @@ ALTER TABLE "user_challenges" DROP CONSTRAINT IF EXISTS "user_challenges_target_
 ALTER TABLE "user_challenges"
   ADD CONSTRAINT "user_challenges_target_user_id_fkey"
   FOREIGN KEY ("target_user_id") REFERENCES "users"("id")
-  ON UPDATE CASCADE ON DELETE SET NULL;
+  ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- 2) Add optional target_player_key and target_aoe_profile_id
 ALTER TABLE "user_challenges" ADD COLUMN IF NOT EXISTS "target_player_key" TEXT;
