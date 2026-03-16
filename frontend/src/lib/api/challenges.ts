@@ -54,10 +54,32 @@ export async function canChallenge(targetUserId: string): Promise<CanChallengeRe
   });
 }
 
-export async function createChallenge(targetUserId: string): Promise<{ challenge: Challenge }> {
+export async function createChallenge(
+  targetUserId: string
+): Promise<{ challenge: Challenge }>;
+export async function createChallenge(
+  body: {
+    targetUserId?: string;
+    targetPlayerKey?: string;
+    targetAoeProfileId?: string;
+    // aliases supported by backend
+    playerKey?: string;
+    aoeProfileId?: string;
+  }
+): Promise<{ challenge: Challenge }>;
+export async function createChallenge(
+  arg: string | {
+    targetUserId?: string;
+    targetPlayerKey?: string;
+    targetAoeProfileId?: string;
+    playerKey?: string;
+    aoeProfileId?: string;
+  }
+): Promise<{ challenge: Challenge }> {
+  const body = typeof arg === "string" ? { targetUserId: arg } : (arg ?? {});
   return jsonFetch<{ challenge: Challenge }>(`/api/challenges`, {
     method: "POST",
-    body: JSON.stringify({ targetUserId }),
+    body: JSON.stringify(body),
   });
 }
 
