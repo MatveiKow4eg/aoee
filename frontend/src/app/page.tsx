@@ -752,6 +752,7 @@ export default function Home() {
 
         return (
           <PlayerHud
+            ratingPoints={typeof (meUser as any)?.ratingPoints === "number" ? (meUser as any).ratingPoints : null}
             nicknameOptions={nicknameOptions}
             onSearchNicknames={(q) => {
               setHudSearchQuery((q ?? "").toString());
@@ -1121,6 +1122,27 @@ export default function Home() {
                   >
                     {name || title || "(без имени)"}
                   </div>
+
+                  {targetUserId ? (
+                    <div
+                      style={{
+                        display: "inline-flex",
+                        alignItems: "center",
+                        gap: 8,
+                        padding: "6px 10px",
+                        borderRadius: 999,
+                        border: "1px solid rgba(202,162,77,0.55)",
+                        background: "rgba(255,255,255,0.06)",
+                        fontWeight: 900,
+                        fontSize: 13,
+                        opacity: 0.95,
+                      }}
+                      title="Challenge rating"
+                    >
+                      <span style={{ opacity: 0.75, fontWeight: 900 }}>Rating</span>
+                      <span style={{ fontWeight: 950 }}>{typeof (playerRec as any)?.ratingPoints === "number" ? (playerRec as any).ratingPoints : "—"}</span>
+                    </div>
+                  ) : null}
 
                   <div style={{ display: "flex", gap: 10, flexWrap: "wrap", justifyContent: "center" }}>
                     {/* Challenge button (debug-friendly): always show for чужое строение.

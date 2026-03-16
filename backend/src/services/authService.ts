@@ -10,6 +10,8 @@ export type PublicUser = {
   displayName?: string | null;
   role?: string | null;
 
+  ratingPoints?: number;
+
   steamConnected?: boolean;
   providers?: string[];
 
@@ -136,6 +138,8 @@ export class AuthService {
       email: user.email,
       displayName: user.displayName,
       role: user.role,
+
+      ratingPoints: typeof user?.ratingPoints === 'number' ? user.ratingPoints : 0,
 
       steamConnected: extra?.steamConnected ?? false,
       providers: extra?.providers ?? [],

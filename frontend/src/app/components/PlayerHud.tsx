@@ -5,6 +5,7 @@ import { createPortal } from "react-dom";
 
 export type PlayerHudProps = {
   nickname?: string | null;
+  ratingPoints?: number | null;
   title?: string | null;
   tierLabel?: string | null | undefined;
   avatarUrl?: string | null;
@@ -67,7 +68,7 @@ function mapTierToBuildingUrl(raw?: string | null): string | null {
   return map[key] ?? null;
 }
 
-export default function PlayerHud({ nickname, title, tierLabel, avatarUrl, buildingUrl, online, steamConnected, steamLinkUrl, onLogout, linkedPlayerName, aoeProfileId, mapPlayers, onSearchNicknames, onFilterGroupsChange, nicknameOptions }: PlayerHudProps) {
+export default function PlayerHud({ nickname, ratingPoints, title, tierLabel, avatarUrl, buildingUrl, online, steamConnected, steamLinkUrl, onLogout, linkedPlayerName, aoeProfileId, mapPlayers, onSearchNicknames, onFilterGroupsChange, nicknameOptions }: PlayerHudProps) {
   const [collapsed, setCollapsed] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [statsOpen, setStatsOpen] = useState(false);
@@ -180,7 +181,30 @@ export default function PlayerHud({ nickname, title, tierLabel, avatarUrl, build
         })()
       : "";
 
-    return { aName, bName, aAvatar, bAvatar, outcome, when };
+    // Rating delta display (client-side derivation from challenge result)
+    // Backend is the source of truth; this is only to show +20/-10 in history UI.
+    const winDelta = +20;
+    const lossDelta = -10;
+
+    let aDelta: number | null = null;
+    let bDelta: number | null = null;
+
+    if (status === "COMPLETED" && (result === "CHALLENGER_WON" || result === "CHALLENGER_LOST")) {
+      if (result === "CHALLENGER_WON") {
+        aDelta = winDelta;
+        bDelta = lossDelta;
+      } else {
+        aDelta = lossDelta;
+        bDelta = winDelta;
+      }
+
+      // If target user is not registered (targetUserId is null), don't show rating deltas.
+      if (!ch?.targetUserId) {
+        bDelta = null;
+      }
+    }
+
+    return { aName, bName, aAvatar, bAvatar, outcome, when, aDelta, bDelta };
   };
 
   const Avatar = ({ url, name }: { url: string | null; name: string }) => {
@@ -982,6 +1006,21 @@ export default function PlayerHud({ nickname, title, tierLabel, avatarUrl, build
                                       {vm.outcome.label}
                                     </div>
                                     {vm.when ? <div style={{ opacity: 0.7, fontSize: isHero ? 13 : 12, textAlign: "right" }}>{vm.when}</div> : null}
+
+                                    {(vm as any)?.aDelta != null || (vm as any)?.bDelta != null ? (
+                                      <div style={{ display: "flex", gap: 10, flexWrap: "wrap", justifyContent: "flex-end" }}>
+                                        {(vm as any)?.aDelta != null ? (
+                                          <div style={{ fontSize: 12, fontWeight: 950, color: (vm as any).aDelta > 0 ? "#2bb673" : "#ffb4b4" }}>
+                                            {vm.aName}: {(vm as any).aDelta > 0 ? "+" : ""}{(vm as any).aDelta}
+                                          </div>
+                                        ) : null}
+                                        {(vm as any)?.bDelta != null ? (
+                                          <div style={{ fontSize: 12, fontWeight: 950, color: (vm as any).bDelta > 0 ? "#2bb673" : "#ffb4b4" }}>
+                                            {vm.bName}: {(vm as any).bDelta > 0 ? "+" : ""}{(vm as any).bDelta}
+                                          </div>
+                                        ) : null}
+                                      </div>
+                                    ) : null}
                                   </div>
                                 </div>
                               );
@@ -1193,7 +1232,28 @@ export default function PlayerHud({ nickname, title, tierLabel, avatarUrl, build
                 <div style={{ height: 13 }} />
               )}
 
-              {/* Rating removed (aoe2insights dependency) */}
+              {/* Challenge rating points */}
+              <div
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: 8,
+                  marginTop: 2,
+                  padding: "6px 10px",
+                  borderRadius: 999,
+                  border: "1px solid rgba(202,162,77,0.55)",
+                  background: "rgba(0,0,0,0.22)",
+                  color: "rgba(247,240,223,0.92)",
+                  fontWeight: 900,
+                  fontSize: 13,
+                  letterSpacing: 0.2,
+                  boxShadow: "inset 0 1px 0 rgba(255,255,255,0.08)",
+                }}
+                title="Challenge rating"
+              >
+                <span style={{ opacity: 0.75, fontWeight: 900 }}>Rating</span>
+                <span style={{ fontWeight: 950 }}>{typeof ratingPoints === "number" ? ratingPoints : "—"}</span>
+              </div>
             </div>
 
                       </div>
