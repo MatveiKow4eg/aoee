@@ -20,6 +20,9 @@ export type PlayerHudProps = {
   /** Canonical claimed AoE profile id (AoePlayer.aoeProfileId). Used to fetch cached stats from backend. */
   aoeProfileId?: string | null;
 
+  /** Map players payload (players[u005]) used to render unclaimed challenge targets by targetPlayerKey. */
+  mapPlayers?: Record<string, any> | null;
+
   /** Called when user performs a search by nickname (free text). */
   onSearchNicknames?: (query: string) => void;
 
@@ -64,7 +67,7 @@ function mapTierToBuildingUrl(raw?: string | null): string | null {
   return map[key] ?? null;
 }
 
-export default function PlayerHud({ nickname, title, tierLabel, avatarUrl, buildingUrl, online, steamConnected, steamLinkUrl, onLogout, linkedPlayerName, aoeProfileId, onSearchNicknames, onFilterGroupsChange, nicknameOptions }: PlayerHudProps) {
+export default function PlayerHud({ nickname, title, tierLabel, avatarUrl, buildingUrl, online, steamConnected, steamLinkUrl, onLogout, linkedPlayerName, aoeProfileId, mapPlayers, onSearchNicknames, onFilterGroupsChange, nicknameOptions }: PlayerHudProps) {
   const [collapsed, setCollapsed] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [statsOpen, setStatsOpen] = useState(false);
@@ -137,7 +140,17 @@ export default function PlayerHud({ nickname, title, tierLabel, avatarUrl, build
     const target = ch?.targetUser ?? null;
 
     const aName = challenger?.displayName ?? ch?.challengerUserId ?? "?";
-    const bName = target?.displayName ?? ch?.targetUserId ?? "?";
+
+    // Target name resolution order:
+    // 1) target user displayName (claimed/registered user)
+    // 2) map payload by targetPlayerKey (unclaimed player)
+    // 3) targetUserId fallback (legacy)
+    // 4) "?"
+    const mapKey = typeof ch?.targetPlayerKey === "string" ? ch.targetPlayerKey.trim() : "";
+    const mapRec = mapKey && mapPlayers ? (mapPlayers as any)[mapKey] : null;
+    const mapName = mapRec ? String((mapRec as any)?.name ?? (mapRec as any)?.nickname ?? "").trim() : "";
+
+    const bName = target?.displayName ?? (mapName || null) ?? ch?.targetUserId ?? "?";
 
     const aAvatar = avatarUrlByMapKey(ch?.challengerPlayerKey) ?? avatarFromUser(challenger, ch?.challengerUserId ?? null);
     const bAvatar = avatarUrlByMapKey(ch?.targetPlayerKey) ?? avatarFromUser(target, ch?.targetUserId ?? null);

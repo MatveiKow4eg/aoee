@@ -759,6 +759,8 @@ export default function Home() {
             onFilterGroupsChange={(g) => {
               setHudFilterGroups(g || {});
             }}
+            // Provide current map players so history can render unclaimed targets by targetPlayerKey.
+            mapPlayers={(payloadRef.current as any)?.players ?? null}
             linkedPlayerName={(meUser as any)?.aoePlayer?.nickname ?? null}
             aoeProfileId={(meUser as any)?.aoePlayer?.aoeProfileId ?? null}
             steamConnected={steamConnected}

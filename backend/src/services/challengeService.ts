@@ -164,10 +164,6 @@ export class ChallengeService {
       try {
         const map = await prisma.mapState.findUnique({ where: { slug: 'default' }, select: { id: true } });
         if (map) {
-          const mp = await prisma.mapPlayer.findFirst({
-            where: { mapStateId: map.id },
-            select: { playerKey: true, extraJson: true },
-          });
           // Note: need to scan all players; Prisma doesn't support JSON query reliably across DBs here.
           // We'll fetch all map players and match in memory.
           const all = await prisma.mapPlayer.findMany({
