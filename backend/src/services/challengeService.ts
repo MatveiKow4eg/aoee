@@ -154,8 +154,20 @@ export class ChallengeService {
 
     // If we have aoeProfileId, try to resolve targetUserId via claim.
     if (!targetUserId && targetAoeProfileId) {
-      const aoe = await prisma.aoePlayer.findUnique({ where: { aoeProfileId: targetAoeProfileId }, select: { claimedByUserId: true } });
-      targetUserId = aoe?.claimedByUserId ? String(aoe.claimedByUserId) : null;
+      const aoe = await prisma.aoePlayer.findUnique({
+        where: { aoeProfileId: targetAoeProfileId },
+        select: { claimedByUserId: true },
+      });
+
+      const claimed = aoe?.claimedByUserId ? String(aoe.claimedByUserId).trim() : '';
+      if (claimed) {
+        // Defensive: aoe_players.claimedByUserId might be stale; ensure referenced user exists
+        // to avoid FK violations when creating userChallenge.
+        const exists = await prisma.user.findUnique({ where: { id: claimed }, select: { id: true } });
+        targetUserId = exists ? claimed : null;
+      } else {
+        targetUserId = null;
+      }
     }
 
     // If aoeProfileId is provided but playerKey was not, try to resolve it from current map payload.
@@ -233,6 +245,27 @@ export class ChallengeService {
     if (targetUserId) data.targetUserId = targetUserId;
     if (targetPlayerKey) data.targetPlayerKey = targetPlayerKey;
     if (targetAoeProfileId) data.targetAoeProfileId = targetAoeProfileId;
+
+    // Final defensive FK guard (covers any future targetUserId assignment paths)
+    if (data.targetUserId) {
+      const uid = String(data.targetUserId).trim();
+      const exists = await prisma.user.findUnique({ where: { id: uid }, select: { id: true } });
+      if (!exists) {
+        const debug = String(process.env.DEBUG_CHALLENGES || '').trim() === '1';
+        if (debug) console.log('[challenge][create] dropping invalid targetUserId before insert', { uid });
+        delete data.targetUserId;
+      }
+    }
+
+    // Debug final insert payload
+    if (String(process.env.DEBUG_CHALLENGES || '').trim() === '1') {
+      console.log('[challenge][create] final data', {
+        challengerUserId: data.challengerUserId,
+        targetUserId: data.targetUserId ?? null,
+        targetPlayerKey: data.targetPlayerKey ?? null,
+        targetAoeProfileId: data.targetAoeProfileId ?? null,
+      });
+    }
 
     const ch = await prisma.userChallenge.create({
       data,
