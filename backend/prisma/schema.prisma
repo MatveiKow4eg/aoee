@@ -91,6 +91,9 @@ model User {
 
   ratingEvents          UserRatingEvent[]
 
+  // Optional link to playerKey-based profile (claimed/unclaimed map player identity)
+  playerProfiles        PlayerProfile[]
+
   @@index([email])
   @@index([challengeCooldownUntil])
   @@index([ratingPoints])
@@ -215,6 +218,7 @@ model UserChallenge {
   @@index([status])
   @@index([expiresAt])
   ratingEvents     UserRatingEvent[]
+  playerRatingEvents PlayerRatingEvent[]
 
   @@map("user_challenges")
 }
