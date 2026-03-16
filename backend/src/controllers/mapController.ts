@@ -114,38 +114,36 @@ const mergeUserIdsIntoMapPlayers = async (players: Record<string, any> | null | 
   return changed ? next : src;
 };
 
-const mergeUserRatingsIntoMapPlayers = async (players: Record<string, any> | null | undefined) => {
+const mergePlayerProfileRatingsIntoMapPlayers = async (players: Record<string, any> | null | undefined) => {
   const src = (players ?? {}) as Record<string, any>;
 
-  const items = Object.entries(src).map(([playerKey, p]) => {
-    const userId = (p?.userId ?? '').toString().trim();
-    return { playerKey, userId };
+  const playerKeys = Array.from(
+    new Set(
+      Object.keys(src)
+        .map((k) => String(k ?? '').trim())
+        .filter(Boolean)
+    )
+  ).slice(0, 800);
+
+  if (playerKeys.length === 0) return src;
+
+  const rows = await prisma.playerProfile.findMany({
+    where: { playerKey: { in: playerKeys } },
+    select: { playerKey: true, ratingPoints: true },
   });
 
-  const withUser = items.filter((it) => it.userId);
-  if (withUser.length === 0) return src;
-
-  const userIds = Array.from(new Set(withUser.map((m) => m.userId))).slice(0, 500);
-  if (userIds.length === 0) return src;
-
-  const rows = await prisma.user.findMany({
-    where: { id: { in: userIds } },
-    select: { id: true, ratingPoints: true },
-  });
-
-  const ratingByUserId = new Map(rows.map((r) => [r.id, r.ratingPoints] as const));
-  if (ratingByUserId.size === 0) return src;
+  const ratingByPlayerKey = new Map(rows.map((r) => [r.playerKey, r.ratingPoints] as const));
+  if (ratingByPlayerKey.size === 0) return src;
 
   let changed = false;
   const next: Record<string, any> = { ...src };
 
-  for (const it of withUser) {
-    if (!ratingByUserId.has(it.userId)) continue;
-    const ratingPoints = ratingByUserId.get(it.userId);
-
-    const cur = next[it.playerKey] ?? {};
+  for (const playerKey of playerKeys) {
+    if (!ratingByPlayerKey.has(playerKey)) continue;
+    const ratingPoints = ratingByPlayerKey.get(playerKey);
+    const cur = next[playerKey] ?? {};
     if (cur?.ratingPoints !== ratingPoints) {
-      next[it.playerKey] = { ...cur, ratingPoints };
+      next[playerKey] = { ...cur, ratingPoints };
       changed = true;
     }
   }
@@ -153,50 +151,50 @@ const mergeUserRatingsIntoMapPlayers = async (players: Record<string, any> | nul
   return changed ? next : src;
 };
 
-const mergeUserWinLossIntoMapPlayers = async (players: Record<string, any> | null | undefined) => {
+const mergePlayerProfileWinLossIntoMapPlayers = async (players: Record<string, any> | null | undefined) => {
   const src = (players ?? {}) as Record<string, any>;
 
-  const items = Object.entries(src).map(([playerKey, p]) => {
-    const userId = (p?.userId ?? '').toString().trim();
-    return { playerKey, userId };
-  });
+  const playerKeys = Array.from(
+    new Set(
+      Object.keys(src)
+        .map((k) => String(k ?? '').trim())
+        .filter(Boolean)
+    )
+  ).slice(0, 800);
 
-  const withUser = items.filter((it) => it.userId);
-  if (withUser.length === 0) return src;
+  if (playerKeys.length === 0) return src;
 
-  const userIds = Array.from(new Set(withUser.map((m) => m.userId))).slice(0, 500);
-  if (userIds.length === 0) return src;
-
-  // Count only matches where rating was actually applied.
+  // We count ONLY challenges where rating was applied.
+  // This aligns UI W/L with rating history and prevents showing unresolved/expired stats.
   const rows = await prisma.userChallenge.findMany({
     where: {
       status: 'COMPLETED',
       ratingAppliedAt: { not: null },
-      OR: [{ winnerUserId: { in: userIds } }, { loserUserId: { in: userIds } }],
+      OR: [{ winnerPlayerKey: { in: playerKeys } }, { loserPlayerKey: { in: playerKeys } }],
     },
-    select: { winnerUserId: true, loserUserId: true },
+    select: { winnerPlayerKey: true, loserPlayerKey: true },
   });
 
-  const winsByUserId = new Map<string, number>();
-  const lossesByUserId = new Map<string, number>();
+  const winsByPlayerKey = new Map<string, number>();
+  const lossesByPlayerKey = new Map<string, number>();
 
   for (const r of rows) {
-    const w = r.winnerUserId ? String(r.winnerUserId).trim() : '';
-    const l = r.loserUserId ? String(r.loserUserId).trim() : '';
-    if (w && userIds.includes(w)) winsByUserId.set(w, (winsByUserId.get(w) ?? 0) + 1);
-    if (l && userIds.includes(l)) lossesByUserId.set(l, (lossesByUserId.get(l) ?? 0) + 1);
+    const w = (r.winnerPlayerKey ?? '').toString().trim();
+    const l = (r.loserPlayerKey ?? '').toString().trim();
+    if (w) winsByPlayerKey.set(w, (winsByPlayerKey.get(w) ?? 0) + 1);
+    if (l) lossesByPlayerKey.set(l, (lossesByPlayerKey.get(l) ?? 0) + 1);
   }
 
   let changed = false;
   const next: Record<string, any> = { ...src };
 
-  for (const it of withUser) {
-    const wins = winsByUserId.get(it.userId) ?? 0;
-    const losses = lossesByUserId.get(it.userId) ?? 0;
+  for (const playerKey of playerKeys) {
+    const wins = winsByPlayerKey.get(playerKey) ?? 0;
+    const losses = lossesByPlayerKey.get(playerKey) ?? 0;
+    const cur = next[playerKey] ?? {};
 
-    const cur = next[it.playerKey] ?? {};
     if (cur?.wins !== wins || cur?.losses !== losses) {
-      next[it.playerKey] = { ...cur, wins, losses };
+      next[playerKey] = { ...cur, wins, losses };
       changed = true;
     }
   }
@@ -224,16 +222,16 @@ export const getMapDefault: RequestHandler = async (_req, res, next) => {
       // ignore
     }
 
-    // Best-effort: enrich map payload with ratingPoints for claimed/registered users.
+    // Best-effort: enrich map payload with ratingPoints from PlayerProfile (playerKey-based rating).
     try {
-      (payload as any).players = await mergeUserRatingsIntoMapPlayers((payload as any).players);
+      (payload as any).players = await mergePlayerProfileRatingsIntoMapPlayers((payload as any).players);
     } catch {
       // ignore
     }
 
-    // Best-effort: enrich map payload with W/L counts for claimed/registered users.
+    // Best-effort: enrich map payload with W/L counts from challenges by winner/loser playerKey.
     try {
-      (payload as any).players = await mergeUserWinLossIntoMapPlayers((payload as any).players);
+      (payload as any).players = await mergePlayerProfileWinLossIntoMapPlayers((payload as any).players);
     } catch {
       // ignore
     }
@@ -380,16 +378,16 @@ export const getMapDefaultPlayers: RequestHandler = async (_req, res, next) => {
       // ignore
     }
 
-    // Best-effort: enrich map payload with ratingPoints for claimed/registered users.
+    // Best-effort: enrich map payload with ratingPoints from PlayerProfile (playerKey-based rating).
     try {
-      (payload as any).players = await mergeUserRatingsIntoMapPlayers((payload as any).players);
+      (payload as any).players = await mergePlayerProfileRatingsIntoMapPlayers((payload as any).players);
     } catch {
       // ignore
     }
 
-    // Best-effort: enrich map payload with W/L counts for claimed/registered users.
+    // Best-effort: enrich map payload with W/L counts from challenges by winner/loser playerKey.
     try {
-      (payload as any).players = await mergeUserWinLossIntoMapPlayers((payload as any).players);
+      (payload as any).players = await mergePlayerProfileWinLossIntoMapPlayers((payload as any).players);
     } catch {
       // ignore
     }
