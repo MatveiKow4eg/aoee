@@ -105,7 +105,9 @@ export default function PlayerHud({ nickname, ratingPoints, title, tierLabel, av
       const { adminListChallenges } = await import("../../lib/api/challenges");
       const r = await adminListChallenges();
       const list = (r as any)?.challenges ?? [];
-      setHistoryState({ status: "ok", challenges: Array.isArray(list) ? list : [] });
+      const items = Array.isArray(list) ? list : [];
+      const filtered = items.filter((ch: any) => String(ch?.status || "").toUpperCase() !== "CANCELLED");
+      setHistoryState({ status: "ok", challenges: filtered });
     } catch (e: any) {
       setHistoryState({ status: "error", message: e?.message ? String(e.message) : "Failed to load history" });
     }
