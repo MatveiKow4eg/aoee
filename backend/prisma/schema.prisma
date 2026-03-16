@@ -165,11 +165,22 @@ enum UserRatingEventReason {
   ADMIN_ADJUST
 }
 
+enum PlayerRatingEventReason {
+  CHALLENGE_WIN
+  CHALLENGE_LOSS
+  ADMIN_ADJUST
+}
+
 model UserChallenge {
   id               String          @id @default(cuid())
 
   // Set when rating has been applied for this challenge to prevent double-processing.
   ratingAppliedAt  DateTime?       @map("rating_applied_at")
+
+  // Player-key based identities (allow rating updates even when targetUserId is null)
+  challengerPlayerKey String?      @map("challenger_player_key")
+  winnerPlayerKey     String?      @map("winner_player_key")
+  loserPlayerKey      String?      @map("loser_player_key")
 
   challengerUserId String          @map("challenger_user_id")
   targetUserId     String?         @map("target_user_id")
@@ -224,6 +235,43 @@ model UserRatingEvent {
   @@index([reason])
   @@index([createdAt])
   @@map("user_rating_events")
+}
+
+model PlayerProfile {
+  id           String   @id @default(cuid())
+  playerKey    String   @unique @map("player_key")
+  aoeProfileId String?  @map("aoe_profile_id")
+  userId       String?  @map("user_id")
+  displayName  String?  @map("display_name")
+  ratingPoints Int      @default(0) @map("rating_points")
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  user         User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  ratingEvents PlayerRatingEvent[]
+
+  @@index([aoeProfileId])
+  @@index([userId])
+  @@index([ratingPoints])
+  @@map("player_profiles")
+}
+
+model PlayerRatingEvent {
+  id          String                 @id @default(cuid())
+  playerKey   String                 @map("player_key")
+  challengeId String?                @map("challenge_id")
+  delta       Int
+  reason      PlayerRatingEventReason
+  createdAt   DateTime               @default(now()) @map("created_at")
+
+  player      PlayerProfile          @relation(fields: [playerKey], references: [playerKey], onDelete: Cascade)
+  challenge   UserChallenge?         @relation(fields: [challengeId], references: [id], onDelete: SetNull)
+
+  @@index([playerKey])
+  @@index([challengeId])
+  @@index([reason])
+  @@index([createdAt])
+  @@map("player_rating_events")
 }
 
 model AoePlayerStatSnapshot {
