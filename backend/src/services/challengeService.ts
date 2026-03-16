@@ -1,5 +1,6 @@
 import { prisma } from '../db/prisma';
 import { HttpError } from '../utils/httpError';
+import { CHALLENGE_LOSS_POINTS, CHALLENGE_WIN_POINTS } from '../config/rating';
 
 export type ChallengeStatus = 'ACTIVE' | 'COMPLETED' | 'EXPIRED' | 'CANCELLED';
 export type ChallengeResult = 'CHALLENGER_WON' | 'CHALLENGER_LOST' | 'DRAW' | 'NO_SHOW';
@@ -326,6 +327,7 @@ export class ChallengeService {
       const winnerUserId = isChallengerWon ? challengerUserId : targetUserId;
       const loserUserId = isChallengerWon ? targetUserId : challengerUserId;
 
+      // 1) Resolve the challenge first (source of truth for winner/loser)
       const updated = await tx.userChallenge.update({
         where: { id: challengeId },
         data: {
@@ -338,6 +340,59 @@ export class ChallengeService {
           notes: typeof notes === 'string' ? notes : undefined,
         },
       });
+
+      // 2) Apply rating points (ONLY once per challenge)
+      // Rules:
+      // - Do NOT apply for CANCELLED (not possible here because we require ACTIVE)
+      // - Do NOT apply if result isn't a win/loss (DRAW/NO_SHOW)
+      // - Only apply when both users are real (non-null) and distinct
+      // - Do NOT apply twice (ratingAppliedAt guard)
+      if (!challenge.ratingAppliedAt && (result === 'CHALLENGER_WON' || result === 'CHALLENGER_LOST')) {
+        if (winnerUserId && loserUserId && winnerUserId !== loserUserId) {
+          // Defensive: ensure both users exist to avoid partial updates.
+          const users = await tx.user.findMany({
+            where: { id: { in: [winnerUserId, loserUserId] } },
+            select: { id: true },
+          });
+          const exists = new Set(users.map((u) => u.id));
+
+          if (exists.has(winnerUserId) && exists.has(loserUserId)) {
+            await tx.user.update({
+              where: { id: winnerUserId },
+              data: { ratingPoints: { increment: CHALLENGE_WIN_POINTS } },
+            });
+            await tx.user.update({
+              where: { id: loserUserId },
+              data: { ratingPoints: { increment: CHALLENGE_LOSS_POINTS } },
+            });
+
+            await tx.userRatingEvent.createMany({
+              data: [
+                {
+                  userId: winnerUserId,
+                  challengeId: challengeId,
+                  delta: CHALLENGE_WIN_POINTS,
+                  reason: 'CHALLENGE_WIN',
+                  createdAt: now,
+                },
+                {
+                  userId: loserUserId,
+                  challengeId: challengeId,
+                  delta: CHALLENGE_LOSS_POINTS,
+                  reason: 'CHALLENGE_LOSS',
+                  createdAt: now,
+                },
+              ],
+            });
+
+            // Mark as processed to prevent double-application.
+            await tx.userChallenge.update({
+              where: { id: challengeId },
+              data: { ratingAppliedAt: now },
+            });
+          }
+        }
+      }
 
       const cooldownUntil = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
       await tx.user.update({
