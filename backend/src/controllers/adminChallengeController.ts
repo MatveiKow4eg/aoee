@@ -102,7 +102,12 @@ export const getAdminChallenges: RequestHandler = async (req, res, next) => {
 
     const enriched = (list ?? []).map((ch: any) => {
       const challengerPlayerKey = userIdToPlayerKey.get(String(ch?.challengerUserId || '').trim()) ?? null;
-      const targetPlayerKey = userIdToPlayerKey.get(String(ch?.targetUserId || '').trim()) ?? null;
+
+      // Preserve DB value if present (important for unclaimed targets where targetUserId is null).
+      const dbTargetKey = typeof (ch as any)?.targetPlayerKey === 'string' ? String((ch as any).targetPlayerKey).trim() : '';
+      const mappedTargetKey = userIdToPlayerKey.get(String(ch?.targetUserId || '').trim()) ?? null;
+      const targetPlayerKey = dbTargetKey || mappedTargetKey || null;
+
       return {
         ...ch,
         challengerPlayerKey,
