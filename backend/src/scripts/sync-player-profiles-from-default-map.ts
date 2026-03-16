@@ -7,10 +7,10 @@ import { MapService } from "../services/mapService";
  */
 async function main() {
   const mapService = new MapService();
-  const map = await mapService.getMapDefault();
+  const map = await mapService.getMapPayload("default");
 
-  // mapService returns an enriched DTO; `players` should include playerKey.
-  const players: Array<any> = (map as any)?.players ?? [];
+  const playersObj: Record<string, any> = (map as any)?.players ?? {};
+  const players: Array<any> = Object.entries(playersObj).map(([playerKey, p]) => ({ playerKey, ...(p ?? {}) }));
 
   if (!Array.isArray(players) || players.length === 0) {
     // eslint-disable-next-line no-console
