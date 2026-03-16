@@ -161,26 +161,51 @@ export class ChallengeService {
     // If aoeProfileId is provided but playerKey was not, try to resolve it from current map payload.
     // This ensures challenges against unclaimed players still keep a stable map identity for UI rendering.
     if (!targetPlayerKey && targetAoeProfileId) {
+      const debug = String(process.env.DEBUG_CHALLENGES || '').trim() === '1';
+      const want = String(targetAoeProfileId).trim();
+      if (debug) {
+        console.log('[challenge][reverse-resolve] start', {
+          want,
+          targetPlayerKeyBefore: targetPlayerKey,
+          targetAoeProfileId,
+        });
+      }
+
       try {
         const map = await prisma.mapState.findUnique({ where: { slug: 'default' }, select: { id: true } });
+        if (debug) console.log('[challenge][reverse-resolve] mapState', { found: !!map, mapStateId: map?.id ?? null });
+
         if (map) {
           // Note: need to scan all players; Prisma doesn't support JSON query reliably across DBs here.
           // We'll fetch all map players and match in memory.
           const all = await prisma.mapPlayer.findMany({
             where: { mapStateId: map.id },
-            select: { playerKey: true, extraJson: true },
+            select: { playerKey: true, extraJson: true, name: true },
           });
-          const want = String(targetAoeProfileId).trim();
+          if (debug) console.log('[challenge][reverse-resolve] mapPlayers loaded', { count: all.length });
+
+          let matched: { playerKey: string; aoe: string; name: string | null } | null = null;
+
           for (const row of all) {
             const extra = (row?.extraJson ?? {}) as any;
             const aoe = String((extra?.aoeProfileId ?? extra?.insightsUserId ?? '')).trim();
             if (aoe && aoe === want) {
-              targetPlayerKey = String(row.playerKey).trim();
+              matched = { playerKey: String(row.playerKey).trim(), aoe, name: (row as any)?.name ?? null };
+              targetPlayerKey = matched.playerKey;
               break;
             }
           }
+
+          if (debug) {
+            console.log('[challenge][reverse-resolve] match', {
+              want,
+              matched: matched ?? null,
+              targetPlayerKeyAfter: targetPlayerKey,
+            });
+          }
         }
-      } catch {
+      } catch (e: any) {
+        if (debug) console.log('[challenge][reverse-resolve] exception', { want, reason: e?.message ? String(e.message) : 'unknown_error' });
         // ignore
       }
     }
