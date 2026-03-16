@@ -158,6 +158,37 @@ export class ChallengeService {
       targetUserId = aoe?.claimedByUserId ? String(aoe.claimedByUserId) : null;
     }
 
+    // If aoeProfileId is provided but playerKey was not, try to resolve it from current map payload.
+    // This ensures challenges against unclaimed players still keep a stable map identity for UI rendering.
+    if (!targetPlayerKey && targetAoeProfileId) {
+      try {
+        const map = await prisma.mapState.findUnique({ where: { slug: 'default' }, select: { id: true } });
+        if (map) {
+          const mp = await prisma.mapPlayer.findFirst({
+            where: { mapStateId: map.id },
+            select: { playerKey: true, extraJson: true },
+          });
+          // Note: need to scan all players; Prisma doesn't support JSON query reliably across DBs here.
+          // We'll fetch all map players and match in memory.
+          const all = await prisma.mapPlayer.findMany({
+            where: { mapStateId: map.id },
+            select: { playerKey: true, extraJson: true },
+          });
+          const want = String(targetAoeProfileId).trim();
+          for (const row of all) {
+            const extra = (row?.extraJson ?? {}) as any;
+            const aoe = String((extra?.aoeProfileId ?? extra?.insightsUserId ?? '')).trim();
+            if (aoe && aoe === want) {
+              targetPlayerKey = String(row.playerKey).trim();
+              break;
+            }
+          }
+        }
+      } catch {
+        // ignore
+      }
+    }
+
     // If we resolved a real target user, enforce rules via canChallenge
     if (targetUserId) {
       const can = await this.canChallenge(challengerUserId, targetUserId, now, { skipTargetExistenceCheck: true });
