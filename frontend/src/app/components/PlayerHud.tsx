@@ -96,6 +96,26 @@ export default function PlayerHud({ nickname, ratingPoints, title, tierLabel, av
     "Башня": true,
     "Халупа": true,
   });
+
+  // Local history stack for UI actions. pushHistory records a short text entry and bumps historySeed
+  // so other parts of the component can react (open history panel, refresh list, etc.).
+  const pushHistory = (text: string) => {
+    try {
+      const key = "localHudHistory";
+      const raw = typeof window !== "undefined" ? window.localStorage.getItem(key) : null;
+      const arr = raw ? JSON.parse(raw) : [];
+      if (Array.isArray(arr)) {
+        arr.unshift({ id: Date.now(), text });
+        // keep last 200 entries
+        const trimmed = arr.slice(0, 200);
+        if (typeof window !== "undefined") window.localStorage.setItem(key, JSON.stringify(trimmed));
+      }
+    } catch {
+      // ignore
+    }
+    setHistorySeed((x) => x + 1);
+  };
+
   // History modal: shows ALL challenges (admin endpoint)
   const openHistoryModal = async () => {
     setHistoryExpanded(false);
