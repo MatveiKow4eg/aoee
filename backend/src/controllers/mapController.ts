@@ -153,6 +153,57 @@ const mergeUserRatingsIntoMapPlayers = async (players: Record<string, any> | nul
   return changed ? next : src;
 };
 
+const mergeUserWinLossIntoMapPlayers = async (players: Record<string, any> | null | undefined) => {
+  const src = (players ?? {}) as Record<string, any>;
+
+  const items = Object.entries(src).map(([playerKey, p]) => {
+    const userId = (p?.userId ?? '').toString().trim();
+    return { playerKey, userId };
+  });
+
+  const withUser = items.filter((it) => it.userId);
+  if (withUser.length === 0) return src;
+
+  const userIds = Array.from(new Set(withUser.map((m) => m.userId))).slice(0, 500);
+  if (userIds.length === 0) return src;
+
+  // Count only matches where rating was actually applied.
+  const rows = await prisma.userChallenge.findMany({
+    where: {
+      status: 'COMPLETED',
+      ratingAppliedAt: { not: null },
+      OR: [{ winnerUserId: { in: userIds } }, { loserUserId: { in: userIds } }],
+    },
+    select: { winnerUserId: true, loserUserId: true },
+  });
+
+  const winsByUserId = new Map<string, number>();
+  const lossesByUserId = new Map<string, number>();
+
+  for (const r of rows) {
+    const w = r.winnerUserId ? String(r.winnerUserId).trim() : '';
+    const l = r.loserUserId ? String(r.loserUserId).trim() : '';
+    if (w && userIds.includes(w)) winsByUserId.set(w, (winsByUserId.get(w) ?? 0) + 1);
+    if (l && userIds.includes(l)) lossesByUserId.set(l, (lossesByUserId.get(l) ?? 0) + 1);
+  }
+
+  let changed = false;
+  const next: Record<string, any> = { ...src };
+
+  for (const it of withUser) {
+    const wins = winsByUserId.get(it.userId) ?? 0;
+    const losses = lossesByUserId.get(it.userId) ?? 0;
+
+    const cur = next[it.playerKey] ?? {};
+    if (cur?.wins !== wins || cur?.losses !== losses) {
+      next[it.playerKey] = { ...cur, wins, losses };
+      changed = true;
+    }
+  }
+
+  return changed ? next : src;
+};
+
 export const getMapDefault: RequestHandler = async (_req, res, next) => {
   try {
     const payload = await mapService.getMapPayload('default');
@@ -176,6 +227,13 @@ export const getMapDefault: RequestHandler = async (_req, res, next) => {
     // Best-effort: enrich map payload with ratingPoints for claimed/registered users.
     try {
       (payload as any).players = await mergeUserRatingsIntoMapPlayers((payload as any).players);
+    } catch {
+      // ignore
+    }
+
+    // Best-effort: enrich map payload with W/L counts for claimed/registered users.
+    try {
+      (payload as any).players = await mergeUserWinLossIntoMapPlayers((payload as any).players);
     } catch {
       // ignore
     }
@@ -325,6 +383,13 @@ export const getMapDefaultPlayers: RequestHandler = async (_req, res, next) => {
     // Best-effort: enrich map payload with ratingPoints for claimed/registered users.
     try {
       (payload as any).players = await mergeUserRatingsIntoMapPlayers((payload as any).players);
+    } catch {
+      // ignore
+    }
+
+    // Best-effort: enrich map payload with W/L counts for claimed/registered users.
+    try {
+      (payload as any).players = await mergeUserWinLossIntoMapPlayers((payload as any).players);
     } catch {
       // ignore
     }
