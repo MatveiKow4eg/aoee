@@ -223,7 +223,48 @@ export class ChallengeService {
       }
     }
 
-    // If we resolved a real target user, enforce rules via canChallenge
+    // Always enforce challenger-side restrictions (cooldown, 1 active challenge at a time).
+    // This MUST apply even when targetUserId is null (unclaimed map players).
+    {
+      await this.expireOverdueChallenges(now);
+
+      const challenger = await prisma.user.findUnique({
+        select: { id: true, challengeCooldownUntil: true },
+        where: { id: challengerUserId },
+      });
+
+      const cooldownUntil = challenger?.challengeCooldownUntil ?? null;
+      if (cooldownUntil && cooldownUntil.getTime() > now.getTime()) {
+        throw new HttpError(400, 'COOLDOWN_ACTIVE', 'Cannot create challenge', {
+          canChallenge: {
+            canChallenge: false,
+            reason: 'COOLDOWN_ACTIVE',
+            cooldownUntil: cooldownUntil.toISOString(),
+            activeChallengeId: null,
+          },
+        });
+      }
+
+      const active = await prisma.userChallenge.findFirst({
+        where: { challengerUserId, status: 'ACTIVE' },
+        select: { id: true },
+        orderBy: { createdAt: 'desc' },
+      });
+
+      if (active) {
+        throw new HttpError(400, 'ACTIVE_CHALLENGE_EXISTS', 'Cannot create challenge', {
+          canChallenge: {
+            canChallenge: false,
+            reason: 'ACTIVE_CHALLENGE_EXISTS',
+            cooldownUntil: null,
+            activeChallengeId: active.id,
+          },
+        });
+      }
+    }
+
+    // If we resolved a real target user, enforce target-specific rules via canChallenge
+    // (self-challenge, optional existence checks, etc.)
     if (targetUserId) {
       const can = await this.canChallenge(challengerUserId, targetUserId, now, { skipTargetExistenceCheck: true });
       if (!can.canChallenge) {

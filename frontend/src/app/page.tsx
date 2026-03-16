@@ -1123,7 +1123,7 @@ export default function Home() {
                     {name || title || "(без имени)"}
                   </div>
 
-                  {targetUserId ? (
+                  {playerId ? (
                     <div style={{ display: "flex", gap: 10, flexWrap: "wrap", justifyContent: "center" }}>
                       <div
                         style={{
@@ -1244,7 +1244,7 @@ export default function Home() {
                           title='Бросить вызов'
                         >
                           {!targetUserId
-                            ? (String(buildingAoeProfileId || '').trim() ? 'Бросить вызов (по aoeProfileId)' : 'Бросить вызов (нет userId)')
+                            ? 'Бросить вызов'
                             : challengeCheck.status === 'loading'
                               ? 'Проверка…'
                               : challengeCheck.status === 'ok' && (challengeCheck as any).data?.canChallenge === false
@@ -1252,11 +1252,9 @@ export default function Home() {
                                 : 'Бросить вызов'}
                         </button>
 
-                        {(!targetUserId) && (
+                        {(!targetUserId) && !String(buildingAoeProfileId || '').trim() && (
                           <div style={{ fontSize: 12, opacity: 0.85, textAlign: 'center', maxWidth: 340 }}>
-                            {String(buildingAoeProfileId || '').trim()
-                              ? 'В payload нет userId, поэтому вызов пойдёт по aoeProfileId. Если профиль не заклеймен — будет ошибка TARGET_NOT_FOUND.'
-                              : 'Нет targetUserId и нет aoeProfileId в payload карты для этой цели.'}
+                            {'Нет targetUserId и нет aoeProfileId в payload карты для этой цели.'}
                           </div>
                         )}
 
