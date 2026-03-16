@@ -1124,23 +1124,46 @@ export default function Home() {
                   </div>
 
                   {targetUserId ? (
-                    <div
-                      style={{
-                        display: "inline-flex",
-                        alignItems: "center",
-                        gap: 8,
-                        padding: "6px 10px",
-                        borderRadius: 999,
-                        border: "1px solid rgba(202,162,77,0.55)",
-                        background: "rgba(255,255,255,0.06)",
-                        fontWeight: 900,
-                        fontSize: 13,
-                        opacity: 0.95,
-                      }}
-                      title="Challenge rating"
-                    >
-                      <span style={{ opacity: 0.75, fontWeight: 900 }}>Rating</span>
-                      <span style={{ fontWeight: 950 }}>{typeof (playerRec as any)?.ratingPoints === "number" ? (playerRec as any).ratingPoints : "—"}</span>
+                    <div style={{ display: "flex", gap: 10, flexWrap: "wrap", justifyContent: "center" }}>
+                      <div
+                        style={{
+                          display: "inline-flex",
+                          alignItems: "center",
+                          gap: 8,
+                          padding: "6px 10px",
+                          borderRadius: 999,
+                          border: "1px solid rgba(202,162,77,0.55)",
+                          background: "rgba(255,255,255,0.06)",
+                          fontWeight: 900,
+                          fontSize: 13,
+                          opacity: 0.95,
+                        }}
+                        title="Challenge rating"
+                      >
+                        <span style={{ opacity: 0.75, fontWeight: 900 }}>Rating</span>
+                        <span style={{ fontWeight: 950 }}>{typeof (playerRec as any)?.ratingPoints === "number" ? (playerRec as any).ratingPoints : "—"}</span>
+                      </div>
+
+                      <div
+                        style={{
+                          display: "inline-flex",
+                          alignItems: "center",
+                          gap: 10,
+                          padding: "6px 10px",
+                          borderRadius: 999,
+                          border: "1px solid rgba(255,255,255,0.14)",
+                          background: "rgba(0,0,0,0.20)",
+                          fontWeight: 900,
+                          fontSize: 13,
+                          opacity: 0.95,
+                        }}
+                        title="Challenge W/L"
+                      >
+                        <span style={{ opacity: 0.75, fontWeight: 900 }}>W/L</span>
+                        <span style={{ fontWeight: 950, color: "#2bb673" }}>{typeof (playerRec as any)?.wins === "number" ? (playerRec as any).wins : 0}</span>
+                        <span style={{ opacity: 0.55 }}>-</span>
+                        <span style={{ fontWeight: 950, color: "#ffb4b4" }}>{typeof (playerRec as any)?.losses === "number" ? (playerRec as any).losses : 0}</span>
+                      </div>
                     </div>
                   ) : null}
 
