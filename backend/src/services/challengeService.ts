@@ -401,8 +401,8 @@ export class ChallengeService {
       const loserUserId = isChallengerWon ? targetUserId : challengerUserId;
 
       // PlayerKey-based winner/loser (works even when targetUserId is null)
-      const challengerPlayerKey = challenge.challengerPlayerKey ? String(challenge.challengerPlayerKey).trim() : '';
-      const targetPlayerKey = challenge.targetPlayerKey ? String(challenge.targetPlayerKey).trim() : '';
+      const challengerPlayerKey = (challenge as any).challengerPlayerKey ? String((challenge as any).challengerPlayerKey).trim() : '';
+      const targetPlayerKey = (challenge as any).targetPlayerKey ? String((challenge as any).targetPlayerKey).trim() : '';
       const winnerPlayerKey = isChallengerWon ? challengerPlayerKey : targetPlayerKey;
       const loserPlayerKey = isChallengerWon ? targetPlayerKey : challengerPlayerKey;
 
@@ -416,10 +416,13 @@ export class ChallengeService {
           resolvedByUserId: adminUserId,
           winnerUserId,
           loserUserId,
-          winnerPlayerKey: winnerPlayerKey || null,
-          loserPlayerKey: loserPlayerKey || null,
+          // Cast to any to avoid TS errors when Prisma client types are out of sync with the latest schema.
+          ...( {
+            winnerPlayerKey: winnerPlayerKey || null,
+            loserPlayerKey: loserPlayerKey || null,
+          } as any),
           notes: typeof notes === 'string' ? notes : undefined,
-        },
+        } as any,
       });
 
       // 2) Apply PLAYER rating points (ONLY once per challenge)
@@ -430,27 +433,27 @@ export class ChallengeService {
       if (!challenge.ratingAppliedAt && (result === 'CHALLENGER_WON' || result === 'CHALLENGER_LOST')) {
         if (winnerPlayerKey && loserPlayerKey && winnerPlayerKey !== loserPlayerKey) {
           // Ensure PlayerProfile exists for both keys
-          await tx.playerProfile.upsert({
+          await (tx as any).playerProfile.upsert({
             where: { playerKey: winnerPlayerKey },
             create: { playerKey: winnerPlayerKey },
             update: {},
           });
-          await tx.playerProfile.upsert({
+          await (tx as any).playerProfile.upsert({
             where: { playerKey: loserPlayerKey },
             create: { playerKey: loserPlayerKey },
             update: {},
           });
 
-          await tx.playerProfile.update({
+          await (tx as any).playerProfile.update({
             where: { playerKey: winnerPlayerKey },
             data: { ratingPoints: { increment: CHALLENGE_WIN_POINTS } },
           });
-          await tx.playerProfile.update({
+          await (tx as any).playerProfile.update({
             where: { playerKey: loserPlayerKey },
             data: { ratingPoints: { increment: CHALLENGE_LOSS_POINTS } },
           });
 
-          await tx.playerRatingEvent.createMany({
+          await (tx as any).playerRatingEvent.createMany({
             data: [
               {
                 playerKey: winnerPlayerKey,
