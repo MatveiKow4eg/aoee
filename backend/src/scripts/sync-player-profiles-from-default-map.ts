@@ -1,11 +1,12 @@
 import { prisma } from "../db/prisma";
-import { mapService } from "../services/mapService";
+import { MapService } from "../services/mapService";
 
 /**
  * One-off task: ensure every playerKey from /maps/default has a PlayerProfile.
  * Safe to re-run (uses upsert).
  */
 async function main() {
+  const mapService = new MapService();
   const map = await mapService.getMapDefault();
 
   // mapService returns an enriched DTO; `players` should include playerKey.
