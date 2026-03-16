@@ -114,6 +114,45 @@ const mergeUserIdsIntoMapPlayers = async (players: Record<string, any> | null | 
   return changed ? next : src;
 };
 
+const mergeUserRatingsIntoMapPlayers = async (players: Record<string, any> | null | undefined) => {
+  const src = (players ?? {}) as Record<string, any>;
+
+  const items = Object.entries(src).map(([playerKey, p]) => {
+    const userId = (p?.userId ?? '').toString().trim();
+    return { playerKey, userId };
+  });
+
+  const withUser = items.filter((it) => it.userId);
+  if (withUser.length === 0) return src;
+
+  const userIds = Array.from(new Set(withUser.map((m) => m.userId))).slice(0, 500);
+  if (userIds.length === 0) return src;
+
+  const rows = await prisma.user.findMany({
+    where: { id: { in: userIds } },
+    select: { id: true, ratingPoints: true },
+  });
+
+  const ratingByUserId = new Map(rows.map((r) => [r.id, r.ratingPoints] as const));
+  if (ratingByUserId.size === 0) return src;
+
+  let changed = false;
+  const next: Record<string, any> = { ...src };
+
+  for (const it of withUser) {
+    if (!ratingByUserId.has(it.userId)) continue;
+    const ratingPoints = ratingByUserId.get(it.userId);
+
+    const cur = next[it.playerKey] ?? {};
+    if (cur?.ratingPoints !== ratingPoints) {
+      next[it.playerKey] = { ...cur, ratingPoints };
+      changed = true;
+    }
+  }
+
+  return changed ? next : src;
+};
+
 export const getMapDefault: RequestHandler = async (_req, res, next) => {
   try {
     const payload = await mapService.getMapPayload('default');
@@ -130,6 +169,13 @@ export const getMapDefault: RequestHandler = async (_req, res, next) => {
     // This is needed to implement challenges from a building/card reliably.
     try {
       (payload as any).players = await mergeUserIdsIntoMapPlayers((payload as any).players);
+    } catch {
+      // ignore
+    }
+
+    // Best-effort: enrich map payload with ratingPoints for claimed/registered users.
+    try {
+      (payload as any).players = await mergeUserRatingsIntoMapPlayers((payload as any).players);
     } catch {
       // ignore
     }
@@ -272,6 +318,13 @@ export const getMapDefaultPlayers: RequestHandler = async (_req, res, next) => {
     // Best-effort: enrich map payload with userId values based on claim links.
     try {
       (payload as any).players = await mergeUserIdsIntoMapPlayers((payload as any).players);
+    } catch {
+      // ignore
+    }
+
+    // Best-effort: enrich map payload with ratingPoints for claimed/registered users.
+    try {
+      (payload as any).players = await mergeUserRatingsIntoMapPlayers((payload as any).players);
     } catch {
       // ignore
     }

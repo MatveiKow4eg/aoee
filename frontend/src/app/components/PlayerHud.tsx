@@ -183,15 +183,19 @@ export default function PlayerHud({ nickname, ratingPoints, title, tierLabel, av
         })()
       : "";
 
-    // Rating delta display (client-side derivation from challenge result)
-    // Backend is the source of truth; this is only to show +20/-10 in history UI.
+    // Rating delta display
+    // IMPORTANT: show deltas ONLY when backend actually applied rating (ratingAppliedAt != null).
+    // Otherwise we would misleadingly show +20/-10 for matches where rating wasn't processed.
     const winDelta = +20;
     const lossDelta = -10;
 
     let aDelta: number | null = null;
     let bDelta: number | null = null;
 
-    if (status === "COMPLETED" && (result === "CHALLENGER_WON" || result === "CHALLENGER_LOST")) {
+    const ratingAppliedAt = ch?.ratingAppliedAt ?? (ch as any)?.rating_applied_at ?? null;
+    const ratingWasApplied = !!ratingAppliedAt;
+
+    if (ratingWasApplied && status === "COMPLETED" && (result === "CHALLENGER_WON" || result === "CHALLENGER_LOST")) {
       if (result === "CHALLENGER_WON") {
         aDelta = winDelta;
         bDelta = lossDelta;
@@ -200,7 +204,7 @@ export default function PlayerHud({ nickname, ratingPoints, title, tierLabel, av
         bDelta = winDelta;
       }
 
-      // If target user is not registered (targetUserId is null), don't show rating deltas.
+      // Defensive: if target user is not registered (targetUserId is null), don't show rating deltas.
       if (!ch?.targetUserId) {
         bDelta = null;
       }
