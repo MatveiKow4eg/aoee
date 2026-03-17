@@ -2,6 +2,7 @@ import { Router } from 'express';
 import rateLimit from 'express-rate-limit';
 import { requireAuth } from '../middleware/auth';
 import { postAdminSyncAoePlayerDirectory, postAdminSyncAoePlayerStats } from '../controllers/adminAoePlayersController';
+import adminMatchEventRoutes from './adminMatchEventRoutes';
 
 export const adminRoutes = Router();
 
@@ -15,3 +16,6 @@ const adminLimiter = rateLimit({
 // Admin-only helper endpoints (keep minimal; used for manual directory sync)
 adminRoutes.post('/admin/aoe-players/sync-directory', adminLimiter, requireAuth(), postAdminSyncAoePlayerDirectory);
 adminRoutes.post('/admin/aoe-players/sync-stats', adminLimiter, requireAuth(), postAdminSyncAoePlayerStats);
+
+// Admin match events (manual matches: 1v1/2v2/3v3/4v4)
+adminRoutes.use('/admin', adminLimiter, requireAuth(), adminMatchEventRoutes);

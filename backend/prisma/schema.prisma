@@ -177,6 +177,29 @@ enum PlayerRatingEventReason {
   ADMIN_ADJUST
 }
 
+enum MatchEventFormat {
+  ONE_V_ONE
+  TWO_V_TWO
+  THREE_V_THREE
+  FOUR_V_FOUR
+}
+
+enum MatchEventStatus {
+  OPEN
+  COMPLETED
+  CANCELLED
+}
+
+enum MatchEventSide {
+  A
+  B
+}
+
+enum MatchEventParticipantResult {
+  WIN
+  LOSS
+}
+
 model UserChallenge {
   id               String          @id @default(cuid())
 
@@ -288,6 +311,59 @@ model PlayerRatingEvent {
   @@index([reason])
   @@index([createdAt])
   @@map("player_rating_events")
+}
+
+model MatchEvent {
+  id              String           @id @default(cuid())
+  format          MatchEventFormat
+  status          MatchEventStatus @default(OPEN)
+  winnerSide      MatchEventSide?
+
+  createdByUserId String           @map("created_by_user_id")
+  resolvedByUserId String?         @map("resolved_by_user_id")
+
+  ratingAppliedAt DateTime?        @map("rating_applied_at")
+
+  notes           String?
+
+  createdAt       DateTime         @default(now()) @map("created_at")
+  resolvedAt      DateTime?        @map("resolved_at")
+
+  createdByUser   User             @relation("MatchEventCreatedBy", fields: [createdByUserId], references: [id], onDelete: Restrict)
+  resolvedByUser  User?            @relation("MatchEventResolvedBy", fields: [resolvedByUserId], references: [id], onDelete: SetNull)
+
+  participants    MatchEventParticipant[]
+
+  @@index([status, createdAt])
+  @@index([createdByUserId])
+  @@index([resolvedByUserId])
+  @@map("match_events")
+}
+
+model MatchEventParticipant {
+  id                 String                     @id @default(cuid())
+  eventId            String                     @map("event_id")
+  side               MatchEventSide
+  slot               Int
+
+  playerKey           String                    @map("player_key")
+  userId              String?                   @map("user_id")
+  aoeProfileId         String?                  @map("aoe_profile_id")
+
+  displayNameSnapshot String                    @map("display_name_snapshot")
+  avatarUrlSnapshot   String?                   @map("avatar_url_snapshot")
+
+  result              MatchEventParticipantResult?
+  ratingDelta         Int?                      @map("rating_delta")
+
+  event               MatchEvent                @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  user                User?                     @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@unique([eventId, side, slot])
+  @@index([eventId])
+  @@index([playerKey])
+  @@index([userId])
+  @@map("match_event_participants")
 }
 
 model AoePlayerStatSnapshot {

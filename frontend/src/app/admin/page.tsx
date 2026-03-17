@@ -1181,6 +1181,9 @@ export default function AdminMapPage() {
             <a href="/admin/challenges" style={{ color: "#caa24d", fontWeight: 900, textDecoration: "none" }}>
               Challenges
             </a>
+            <a href="/admin/matches" style={{ color: "#caa24d", fontWeight: 900, textDecoration: "none" }}>
+              Matches
+            </a>
             <a href="/login?next=%2Fadmin" style={{ color: "#caa24d", fontWeight: 900, textDecoration: "none" }}>
               Login as another user
             </a>
@@ -1316,6 +1319,23 @@ export default function AdminMapPage() {
           title="Открыть управление вызовами"
         >
           Challenges
+        </button>
+
+        <button
+          onClick={() => router.push("/admin/matches")}
+          style={{
+            appearance: "none",
+            border: "1px solid rgba(255,255,255,0.25)",
+            background: "rgba(0,0,0,0.35)",
+            color: "rgba(255,255,255,0.95)",
+            fontWeight: 900,
+            borderRadius: 10,
+            padding: "8px 12px",
+            cursor: "pointer",
+          }}
+          title="Открыть управление матчами"
+        >
+          Matches
         </button>
 
         <button
