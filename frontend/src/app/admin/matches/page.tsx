@@ -59,9 +59,20 @@ export default function AdminMatchesPage() {
   const loadPlayers = async () => {
     setPlayersState({ status: "loading" });
     try {
-      // Use the same enriched map payload the main UI uses.
-      const r = await apiFetch(`/api/map/default`);
-      const players = (r as any)?.payload?.players ?? (r as any)?.players ?? null;
+      // Prefer enriched map payload (includes avatarUrl, userId, etc.)
+      let r: any = null;
+      try {
+        r = await apiFetch(`/api/map/default`);
+      } catch {
+        r = null;
+      }
+
+      // Fallback: admin map editor store endpoint (raw map state)
+      if (!r) {
+        r = await apiFetch(`/api/map-state`);
+      }
+
+      const players = (r as any)?.payload?.players ?? (r as any)?.players ?? (r as any)?.playersByKey ?? (r as any)?.state?.players ?? null;
       const src: Record<string, any> = players && typeof players === "object" ? players : {};
 
       const items = Object.entries(src)
@@ -100,6 +111,14 @@ export default function AdminMatchesPage() {
     setTeamA(Array.from({ length: slots }, (_, i) => emptyParticipant("A", i + 1)));
     setTeamB(Array.from({ length: slots }, (_, i) => emptyParticipant("B", i + 1)));
   }, [slots]);
+
+  // Auto-load available players when opening the create modal.
+  useEffect(() => {
+    if (!createOpen) return;
+    if (playersState.status === "ok" && playersState.items.length > 0) return;
+    void loadPlayers();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [createOpen]);
 
   const load = async () => {
     setState((s) => ({ ...s, status: "loading" }));
@@ -373,6 +392,7 @@ export default function AdminMatchesPage() {
                         </div>
 
                         <select
+                          disabled={playersState.status !== "ok" || playersState.items.length === 0}
                           value={p.playerKey}
                           onChange={(e) => {
                             const key = e.target.value;
@@ -437,6 +457,7 @@ export default function AdminMatchesPage() {
                         </div>
 
                         <select
+                          disabled={playersState.status !== "ok" || playersState.items.length === 0}
                           value={p.playerKey}
                           onChange={(e) => {
                             const key = e.target.value;
