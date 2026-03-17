@@ -2,21 +2,7 @@
 
 import React, { useEffect, useMemo, useState } from "react";
 import { adminCancelMatchEvent, adminCreateMatchEvent, adminListMatchEvents, adminResolveMatchEvent, type CreateMatchEventParticipantInput, type MatchEventFormat, type MatchEventSide, type MatchEventStatus } from "../../../lib/api/matchEvents";
-
-const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || "";
-
-async function apiFetch(path: string) {
-  const r = await fetch(`${API_BASE}${path}`, { credentials: "include" });
-  const text = await r.text();
-  let json: any = null;
-  try {
-    json = text ? JSON.parse(text) : null;
-  } catch {
-    json = null;
-  }
-  if (!r.ok) throw new Error(json?.message || json?.error || text || `HTTP ${r.status}`);
-  return json;
-}
+import { loadMapState } from "../../../store/mapStateStore";
 
 const formatToSlots = (format: MatchEventFormat): number => {
   switch (format) {
@@ -59,20 +45,10 @@ export default function AdminMatchesPage() {
   const loadPlayers = async () => {
     setPlayersState({ status: "loading" });
     try {
-      // Prefer enriched map payload (includes avatarUrl, userId, etc.)
-      let r: any = null;
-      try {
-        r = await apiFetch(`/api/map/default`);
-      } catch {
-        r = null;
-      }
-
-      // Fallback: admin map editor store endpoint (raw map state)
-      if (!r) {
-        r = await apiFetch(`/api/map-state`);
-      }
-
-      const players = (r as any)?.payload?.players ?? (r as any)?.players ?? (r as any)?.playersByKey ?? (r as any)?.state?.players ?? null;
+      // Use the same storage-backed map state as the admin map editor.
+      // This avoids relying on backend endpoints that may not exist in prod.
+      const r = await loadMapState();
+      const players = (r as any)?.players ?? (r as any)?.payload?.players ?? null;
       const src: Record<string, any> = players && typeof players === "object" ? players : {};
 
       const items = Object.entries(src)
