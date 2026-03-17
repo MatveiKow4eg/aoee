@@ -1,7 +1,6 @@
 import { prisma } from '../db/prisma';
 import { HttpError } from '../utils/httpError';
 import { CHALLENGE_LOSS_POINTS, CHALLENGE_WIN_POINTS } from '../config/rating';
-import { AuthRepository } from '../repositories/authRepository';
 
 export type ChallengeStatus = 'ACTIVE' | 'COMPLETED' | 'EXPIRED' | 'CANCELLED';
 export type ChallengeResult = 'CHALLENGER_WON' | 'CHALLENGER_LOST' | 'DRAW' | 'NO_SHOW';
@@ -20,7 +19,6 @@ export type CanChallengeResponse = {
 };
 
 export class ChallengeService {
-  constructor(private readonly authRepo = new AuthRepository()) {}
   /**
    * Lazy expiry: any read path can call this to mark expired challenges.
    * By default, expiry also triggers challenger cooldown.
@@ -397,52 +395,54 @@ export class ChallengeService {
     const rows = await prisma.userChallenge.findMany({
       where: filter.status ? { status: filter.status } : undefined,
       orderBy: { createdAt: 'desc' },
-      // Keep base shape stable; just enrich nested users with avatarUrl.
       include: {
         challengerUser: { select: { id: true, displayName: true } },
         targetUser: { select: { id: true, displayName: true } },
       },
     });
 
-    // Enrich users with avatarUrl (Steam avatar) for history rendering.
-    // NOTE: avatarUrl is not stored in users table; it is derived from linked Steam account.
-    const userIds = Array.from(
-      new Set(
-        rows
-          .flatMap((ch: any) => [ch?.challengerUser?.id ?? null, ch?.targetUser?.id ?? null])
-          .filter((x: any) => typeof x === 'string' && x.trim())
-          .map((x: any) => String(x).trim())
-      )
-    );
+    // Enrich users with INTERNAL site avatars.
+    // Frontend expects local sprites like /people/u001.png (NOT Steam URLs).
+    const userIdToLegacyPeopleUrl = (userIdRaw: unknown): string | null => {
+      const raw = typeof userIdRaw === 'string' ? userIdRaw.trim() : '';
+      if (!raw) return null;
 
-    const avatarByUserId = new Map<string, string | null>();
-    await Promise.all(
-      userIds.map(async (id) => {
-        try {
-          const url = await this.authRepo.getSteamAvatarUrlByUserId(id);
-          avatarByUserId.set(id, url);
-        } catch {
-          avatarByUserId.set(id, null);
-        }
-      })
-    );
+      // Legacy rule (matches PlayerHud fallback): take first 3 digits from userId, build uXXX.
+      const digits = raw.replace(/\D+/g, '');
+      if (!digits) return null;
+
+      const n = parseInt(digits.slice(0, 3), 10);
+      if (!Number.isFinite(n) || n <= 0) return null;
+
+      return `/people/u${String(n).padStart(3, '0')}.png`;
+    };
+
+    const playerKeyToPeopleUrl = (playerKeyRaw: unknown): string | null => {
+      const k = typeof playerKeyRaw === 'string' ? playerKeyRaw.trim() : '';
+      if (!k) return null;
+      return `/people/${encodeURIComponent(k)}.png`;
+    };
 
     return rows.map((ch: any) => {
-      const challengerId = ch?.challengerUser?.id ? String(ch.challengerUser.id) : null;
-      const targetId = ch?.targetUser?.id ? String(ch.targetUser.id) : null;
+      const challengerAvatar =
+        playerKeyToPeopleUrl(ch?.challengerPlayerKey) ?? userIdToLegacyPeopleUrl(ch?.challengerUser?.id ?? ch?.challengerUserId);
+
+      // targetPlayerKey may be null historically; then fall back to legacy uXXX by user id.
+      const targetAvatar =
+        playerKeyToPeopleUrl(ch?.targetPlayerKey) ?? userIdToLegacyPeopleUrl(ch?.targetUser?.id ?? ch?.targetUserId);
 
       return {
         ...ch,
         challengerUser: ch.challengerUser
           ? {
               ...ch.challengerUser,
-              avatarUrl: challengerId ? (avatarByUserId.get(challengerId) ?? null) : null,
+              avatarUrl: challengerAvatar,
             }
           : null,
         targetUser: ch.targetUser
           ? {
               ...ch.targetUser,
-              avatarUrl: targetId ? (avatarByUserId.get(targetId) ?? null) : null,
+              avatarUrl: targetAvatar,
             }
           : null,
       };
