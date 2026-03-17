@@ -94,6 +94,15 @@ export async function listMyChallenges(): Promise<{ challenges: Challenge[] }> {
   return jsonFetch<{ challenges: Challenge[] }>(`/api/challenges/my`, { method: "GET" });
 }
 
+/**
+ * Global community challenge history (auth required).
+ * Kept separate from adminListChallenges() to avoid admin-only 403 in HUD.
+ */
+export async function listChallengeHistory(status?: string): Promise<{ challenges: any[] }> {
+  const qs = status ? `?status=${encodeURIComponent(status)}` : "";
+  return jsonFetch<{ challenges: any[] }>(`/api/challenges/history${qs}`, { method: "GET" });
+}
+
 export async function adminListChallenges(status?: string): Promise<{ challenges: any[] }> {
   const qs = status ? `?status=${encodeURIComponent(status)}` : "";
   return jsonFetch<{ challenges: any[] }>(`/api/admin/challenges${qs}`, { method: "GET" });

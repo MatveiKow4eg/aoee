@@ -70,3 +70,24 @@ export const getMyChallenges: RequestHandler = async (req, res, next) => {
     next(e);
   }
 };
+
+/**
+ * Global community challenge history (read-only).
+ * Auth required, but NOT admin-only.
+ */
+export const getChallengeHistory: RequestHandler = async (req, res, next) => {
+  try {
+    const user = (req as any).user;
+    if (!user) throw new HttpError(401, 'UNAUTHORIZED', 'Unauthorized');
+
+    const status = String((req.query as any)?.status || '').trim().toUpperCase();
+
+    const list = await challengeService.listChallengeHistory({
+      status: (status ? (status as any) : undefined) as any,
+    });
+
+    res.json({ challenges: list });
+  } catch (e) {
+    next(e);
+  }
+};

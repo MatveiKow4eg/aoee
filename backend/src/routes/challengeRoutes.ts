@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import rateLimit from 'express-rate-limit';
 import { requireAuth } from '../middleware/auth';
-import { getCanChallenge, getMyChallenges, postCreateChallenge } from '../controllers/challengeController';
+import { getCanChallenge, getChallengeHistory, getMyChallenges, postCreateChallenge } from '../controllers/challengeController';
 
 export const challengeRoutes = Router();
 
@@ -16,3 +16,6 @@ const limiter = rateLimit({
 challengeRoutes.get('/challenges/can-challenge/:targetUserId', limiter, requireAuth(), getCanChallenge);
 challengeRoutes.post('/challenges', limiter, requireAuth(), postCreateChallenge);
 challengeRoutes.get('/challenges/my', limiter, requireAuth(), getMyChallenges);
+
+// Global community history (auth required)
+challengeRoutes.get('/challenges/history', limiter, requireAuth(), getChallengeHistory);

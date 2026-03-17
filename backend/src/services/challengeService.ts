@@ -381,6 +381,27 @@ export class ChallengeService {
     });
   }
 
+  /**
+   * Global community history (read-only).
+   * Auth required, but NOT admin-only.
+   *
+   * Keep the shape compatible with HUD history rendering:
+   * - include challengerUser/targetUser displayName
+   * - include playerKey-based fields if present in DB
+   */
+  async listChallengeHistory(filter: { status?: ChallengeStatus } = {}) {
+    await this.expireOverdueChallenges(new Date());
+
+    return prisma.userChallenge.findMany({
+      where: filter.status ? { status: filter.status } : undefined,
+      orderBy: { createdAt: 'desc' },
+      include: {
+        challengerUser: { select: { id: true, displayName: true } },
+        targetUser: { select: { id: true, displayName: true } },
+      },
+    });
+  }
+
   async resolveChallenge(params: { challengeId: string; adminUserId: string; result: ChallengeResult; notes?: string | null }, now = new Date()) {
     const { challengeId, adminUserId, result, notes } = params;
 
