@@ -127,7 +127,7 @@ const mergePlayerProfileRatingsIntoMapPlayers = async (players: Record<string, a
 
   if (playerKeys.length === 0) return src;
 
-  const rows = await (prisma as any).playerProfile.findMany({
+  const rows = await prisma.playerProfile.findMany({
     where: { playerKey: { in: playerKeys } },
     select: { playerKey: true, ratingPoints: true, displayName: true, claimedByUserId: true },
   });

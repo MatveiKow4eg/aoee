@@ -681,7 +681,7 @@ export class ChallengeService {
     ).slice(0, 800);
 
     const profiles = keys.length
-      ? await (prisma as any).playerProfile.findMany({
+      ? await prisma.playerProfile.findMany({
           where: { playerKey: { in: keys } },
           select: { playerKey: true, ratingPoints: true, displayName: true, claimedByUserId: true },
         })
