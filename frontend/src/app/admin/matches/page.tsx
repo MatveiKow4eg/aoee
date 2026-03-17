@@ -3,6 +3,21 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { adminCancelMatchEvent, adminCreateMatchEvent, adminListMatchEvents, adminResolveMatchEvent, type CreateMatchEventParticipantInput, type MatchEventFormat, type MatchEventSide, type MatchEventStatus } from "../../../lib/api/matchEvents";
 
+const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || "";
+
+async function apiFetch(path: string) {
+  const r = await fetch(`${API_BASE}${path}`, { credentials: "include" });
+  const text = await r.text();
+  let json: any = null;
+  try {
+    json = text ? JSON.parse(text) : null;
+  } catch {
+    json = null;
+  }
+  if (!r.ok) throw new Error(json?.message || json?.error || text || `HTTP ${r.status}`);
+  return json;
+}
+
 const formatToSlots = (format: MatchEventFormat): number => {
   switch (format) {
     case "ONE_V_ONE":
@@ -33,6 +48,38 @@ export default function AdminMatchesPage() {
   const [createOpen, setCreateOpen] = useState(false);
   const [createFormat, setCreateFormat] = useState<MatchEventFormat>("ONE_V_ONE");
   const [createNotes, setCreateNotes] = useState<string>("");
+
+  const [playersState, setPlayersState] = useState<
+    | { status: "idle" }
+    | { status: "loading" }
+    | { status: "ok"; items: { playerKey: string; name: string; avatarUrl: string | null; aoeProfileId: string | null; userId: string | null }[] }
+    | { status: "error"; message: string }
+  >({ status: "idle" });
+
+  const loadPlayers = async () => {
+    setPlayersState({ status: "loading" });
+    try {
+      // Use the same enriched map payload the main UI uses.
+      const r = await apiFetch(`/api/map/default`);
+      const players = (r as any)?.payload?.players ?? (r as any)?.players ?? null;
+      const src: Record<string, any> = players && typeof players === "object" ? players : {};
+
+      const items = Object.entries(src)
+        .map(([playerKey, rec]) => {
+          const name = String((rec as any)?.displayName ?? (rec as any)?.name ?? (rec as any)?.nickname ?? playerKey).trim();
+          const avatarUrl = typeof (rec as any)?.avatarUrl === "string" ? String((rec as any).avatarUrl).trim() : `/people/${encodeURIComponent(playerKey)}.png`;
+          const aoeProfileId = (rec as any)?.aoeProfileId ? String((rec as any).aoeProfileId).trim() : null;
+          const userId = (rec as any)?.userId ? String((rec as any).userId).trim() : null;
+          return { playerKey: String(playerKey).trim(), name, avatarUrl: avatarUrl || null, aoeProfileId, userId };
+        })
+        .filter((x) => x.playerKey)
+        .sort((a, b) => a.playerKey.localeCompare(b.playerKey) || a.name.localeCompare(b.name));
+
+      setPlayersState({ status: "ok", items });
+    } catch (e: any) {
+      setPlayersState({ status: "error", message: e?.message ? String(e.message) : "Failed to load players" });
+    }
+  };
 
   const slots = useMemo(() => formatToSlots(createFormat), [createFormat]);
 
@@ -75,6 +122,7 @@ export default function AdminMatchesPage() {
       ...p,
       playerKey: (p.playerKey || "").trim(),
       displayNameSnapshot: (p.displayNameSnapshot || "").trim(),
+      avatarUrlSnapshot: typeof (p as any)?.avatarUrlSnapshot === "string" ? String((p as any).avatarUrlSnapshot).trim() : (p as any)?.avatarUrlSnapshot ?? null,
     }));
 
     await adminCreateMatchEvent({
@@ -294,60 +342,144 @@ export default function AdminMatchesPage() {
 
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
               <div>
-                <div style={{ fontWeight: 950, marginBottom: 8 }}>Team A</div>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, marginBottom: 8 }}>
+                  <div style={{ fontWeight: 950 }}>Team A</div>
+                  <button
+                    type="button"
+                    onClick={() => loadPlayers()}
+                    style={{ padding: "6px 10px", borderRadius: 10, border: "1px solid rgba(255,255,255,0.18)", background: "rgba(255,255,255,0.06)", color: "#f7f0df", fontWeight: 900, cursor: "pointer" }}
+                    title="Reload players from map"
+                  >
+                    Load players
+                  </button>
+                </div>
+
+                {playersState.status === "loading" ? <div style={{ opacity: 0.8, fontSize: 12, marginBottom: 8 }}>Loading players…</div> : null}
+                {playersState.status === "error" ? <div style={{ opacity: 0.9, color: "#ffb4b4", fontSize: 12, marginBottom: 8 }}>{playersState.message}</div> : null}
+
                 <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                  {teamA.map((p, idx) => (
-                    <div key={idx} style={{ display: "grid", gridTemplateColumns: "70px 1fr 1fr", gap: 8 }}>
-                      <div style={{ opacity: 0.8, fontWeight: 900, alignSelf: "center" }}>Slot {p.slot}</div>
-                      <input
-                        value={p.playerKey}
-                        onChange={(e) => {
-                          const v = e.target.value;
-                          setTeamA((prev) => prev.map((x, i) => (i === idx ? { ...x, playerKey: v } : x)));
-                        }}
-                        placeholder="playerKey (u001)"
-                        style={{ padding: "8px 10px", borderRadius: 10, border: "1px solid rgba(255,255,255,0.18)", background: "rgba(255,255,255,0.06)", color: "#f7f0df" }}
-                      />
-                      <input
-                        value={p.displayNameSnapshot}
-                        onChange={(e) => {
-                          const v = e.target.value;
-                          setTeamA((prev) => prev.map((x, i) => (i === idx ? { ...x, displayNameSnapshot: v } : x)));
-                        }}
-                        placeholder="display name"
-                        style={{ padding: "8px 10px", borderRadius: 10, border: "1px solid rgba(255,255,255,0.18)", background: "rgba(255,255,255,0.06)", color: "#f7f0df" }}
-                      />
-                    </div>
-                  ))}
+                  {teamA.map((p, idx) => {
+                    const selected = (playersState.status === "ok" ? playersState.items.find((x) => x.playerKey === p.playerKey) : null) ?? null;
+                    const avatar = selected?.avatarUrl ?? (p as any)?.avatarUrlSnapshot ?? null;
+
+                    return (
+                      <div key={idx} style={{ display: "grid", gridTemplateColumns: "70px 44px 1fr 1fr", gap: 8, alignItems: "center" }}>
+                        <div style={{ opacity: 0.8, fontWeight: 900 }}>Slot {p.slot}</div>
+                        <div style={{ width: 40, height: 40, borderRadius: 999, overflow: "hidden", border: "1px solid rgba(255,255,255,0.18)", background: "rgba(255,255,255,0.06)" }}>
+                          {avatar ? (
+                            // eslint-disable-next-line @next/next/no-img-element
+                            <img src={avatar} alt="" style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }} />
+                          ) : null}
+                        </div>
+
+                        <select
+                          value={p.playerKey}
+                          onChange={(e) => {
+                            const key = e.target.value;
+                            const item = playersState.status === "ok" ? playersState.items.find((x) => x.playerKey === key) : null;
+                            setTeamA((prev) =>
+                              prev.map((x, i) =>
+                                i === idx
+                                  ? {
+                                      ...x,
+                                      playerKey: key,
+                                      displayNameSnapshot: item?.name ?? x.displayNameSnapshot,
+                                      avatarUrlSnapshot: item?.avatarUrl ?? (x as any).avatarUrlSnapshot ?? null,
+                                      aoeProfileId: item?.aoeProfileId ?? x.aoeProfileId ?? null,
+                                      userId: item?.userId ?? x.userId ?? null,
+                                    }
+                                  : x
+                              )
+                            );
+                          }}
+                          style={{ padding: "8px 10px", borderRadius: 10, border: "1px solid rgba(255,255,255,0.18)", background: "rgba(255,255,255,0.06)", color: "#f7f0df", fontWeight: 900 }}
+                        >
+                          <option value="">Select player…</option>
+                          {playersState.status === "ok"
+                            ? playersState.items.map((it) => (
+                                <option key={it.playerKey} value={it.playerKey}>
+                                  {it.playerKey} — {it.name}
+                                </option>
+                              ))
+                            : null}
+                        </select>
+
+                        <input
+                          value={p.displayNameSnapshot}
+                          onChange={(e) => {
+                            const v = e.target.value;
+                            setTeamA((prev) => prev.map((x, i) => (i === idx ? { ...x, displayNameSnapshot: v } : x)));
+                          }}
+                          placeholder="display name"
+                          style={{ padding: "8px 10px", borderRadius: 10, border: "1px solid rgba(255,255,255,0.18)", background: "rgba(255,255,255,0.06)", color: "#f7f0df" }}
+                        />
+                      </div>
+                    );
+                  })}
                 </div>
               </div>
 
               <div>
                 <div style={{ fontWeight: 950, marginBottom: 8 }}>Team B</div>
                 <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                  {teamB.map((p, idx) => (
-                    <div key={idx} style={{ display: "grid", gridTemplateColumns: "70px 1fr 1fr", gap: 8 }}>
-                      <div style={{ opacity: 0.8, fontWeight: 900, alignSelf: "center" }}>Slot {p.slot}</div>
-                      <input
-                        value={p.playerKey}
-                        onChange={(e) => {
-                          const v = e.target.value;
-                          setTeamB((prev) => prev.map((x, i) => (i === idx ? { ...x, playerKey: v } : x)));
-                        }}
-                        placeholder="playerKey (u005)"
-                        style={{ padding: "8px 10px", borderRadius: 10, border: "1px solid rgba(255,255,255,0.18)", background: "rgba(255,255,255,0.06)", color: "#f7f0df" }}
-                      />
-                      <input
-                        value={p.displayNameSnapshot}
-                        onChange={(e) => {
-                          const v = e.target.value;
-                          setTeamB((prev) => prev.map((x, i) => (i === idx ? { ...x, displayNameSnapshot: v } : x)));
-                        }}
-                        placeholder="display name"
-                        style={{ padding: "8px 10px", borderRadius: 10, border: "1px solid rgba(255,255,255,0.18)", background: "rgba(255,255,255,0.06)", color: "#f7f0df" }}
-                      />
-                    </div>
-                  ))}
+                  {teamB.map((p, idx) => {
+                    const selected = (playersState.status === "ok" ? playersState.items.find((x) => x.playerKey === p.playerKey) : null) ?? null;
+                    const avatar = selected?.avatarUrl ?? (p as any)?.avatarUrlSnapshot ?? null;
+
+                    return (
+                      <div key={idx} style={{ display: "grid", gridTemplateColumns: "70px 44px 1fr 1fr", gap: 8, alignItems: "center" }}>
+                        <div style={{ opacity: 0.8, fontWeight: 900 }}>Slot {p.slot}</div>
+                        <div style={{ width: 40, height: 40, borderRadius: 999, overflow: "hidden", border: "1px solid rgba(255,255,255,0.18)", background: "rgba(255,255,255,0.06)" }}>
+                          {avatar ? (
+                            // eslint-disable-next-line @next/next/no-img-element
+                            <img src={avatar} alt="" style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }} />
+                          ) : null}
+                        </div>
+
+                        <select
+                          value={p.playerKey}
+                          onChange={(e) => {
+                            const key = e.target.value;
+                            const item = playersState.status === "ok" ? playersState.items.find((x) => x.playerKey === key) : null;
+                            setTeamB((prev) =>
+                              prev.map((x, i) =>
+                                i === idx
+                                  ? {
+                                      ...x,
+                                      playerKey: key,
+                                      displayNameSnapshot: item?.name ?? x.displayNameSnapshot,
+                                      avatarUrlSnapshot: item?.avatarUrl ?? (x as any).avatarUrlSnapshot ?? null,
+                                      aoeProfileId: item?.aoeProfileId ?? x.aoeProfileId ?? null,
+                                      userId: item?.userId ?? x.userId ?? null,
+                                    }
+                                  : x
+                              )
+                            );
+                          }}
+                          style={{ padding: "8px 10px", borderRadius: 10, border: "1px solid rgba(255,255,255,0.18)", background: "rgba(255,255,255,0.06)", color: "#f7f0df", fontWeight: 900 }}
+                        >
+                          <option value="">Select player…</option>
+                          {playersState.status === "ok"
+                            ? playersState.items.map((it) => (
+                                <option key={it.playerKey} value={it.playerKey}>
+                                  {it.playerKey} — {it.name}
+                                </option>
+                              ))
+                            : null}
+                        </select>
+
+                        <input
+                          value={p.displayNameSnapshot}
+                          onChange={(e) => {
+                            const v = e.target.value;
+                            setTeamB((prev) => prev.map((x, i) => (i === idx ? { ...x, displayNameSnapshot: v } : x)));
+                          }}
+                          placeholder="display name"
+                          style={{ padding: "8px 10px", borderRadius: 10, border: "1px solid rgba(255,255,255,0.18)", background: "rgba(255,255,255,0.06)", color: "#f7f0df" }}
+                        />
+                      </div>
+                    );
+                  })}
                 </div>
               </div>
             </div>
