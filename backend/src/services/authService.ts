@@ -139,6 +139,8 @@ export class AuthService {
       displayName: user.displayName,
       role: user.role,
 
+      // OR-identity model: rating lives on PlayerProfile (playerKey-based), not on User.
+      // Keep this field for backward compatibility, but do not treat it as authoritative.
       ratingPoints: typeof user?.ratingPoints === 'number' ? user.ratingPoints : 0,
 
       steamConnected: extra?.steamConnected ?? false,

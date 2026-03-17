@@ -130,10 +130,31 @@ export class AoePlayerService {
           throw new HttpError(409, 'PLAYER_PROFILE_ALREADY_CLAIMED', 'Player profile already claimed by another user');
         }
       } else {
-        // No playerKey found in current map payload; keep roster claim only.
-        // This still allows account ownership, but profile-based rating will appear once playerKey is known.
-        if (String(process.env.DEBUG_CHALLENGES || '').trim() === '1') {
-          console.log('[claim][playerProfile] skip: cannot resolve playerKey', { aoeProfileId, reason: keyRes.reason });
+        // Fallback: try to claim an existing profile by aoeProfileId.
+        // This supports OR-identity: do not create a new rating identity.
+        const existingByAoe = await (prisma as any).playerProfile.findFirst({
+          where: { aoeProfileId },
+          select: { playerKey: true, claimedByUserId: true },
+        });
+
+        if (existingByAoe?.playerKey) {
+          const pk = String(existingByAoe.playerKey).trim();
+          const claimed = existingByAoe.claimedByUserId ? String(existingByAoe.claimedByUserId).trim() : '';
+
+          if (!claimed) {
+            await (prisma as any).playerProfile.update({
+              where: { playerKey: pk },
+              data: { claimedByUserId: userId },
+            });
+          } else if (claimed !== userId) {
+            throw new HttpError(409, 'PLAYER_PROFILE_ALREADY_CLAIMED', 'Player profile already claimed by another user');
+          }
+        } else {
+          // No playerKey found in current map payload; keep roster claim only.
+          // This still allows account ownership, but profile-based rating will appear once playerKey is known.
+          if (String(process.env.DEBUG_CHALLENGES || '').trim() === '1') {
+            console.log('[claim][playerProfile] skip: cannot resolve playerKey', { aoeProfileId, reason: keyRes.reason });
+          }
         }
       }
     } catch (e: any) {

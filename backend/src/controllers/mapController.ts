@@ -127,23 +127,43 @@ const mergePlayerProfileRatingsIntoMapPlayers = async (players: Record<string, a
 
   if (playerKeys.length === 0) return src;
 
-  const rows = await prisma.playerProfile.findMany({
+  const rows = await (prisma as any).playerProfile.findMany({
     where: { playerKey: { in: playerKeys } },
-    select: { playerKey: true, ratingPoints: true },
+    select: { playerKey: true, ratingPoints: true, displayName: true, claimedByUserId: true },
   });
 
-  const ratingByPlayerKey = new Map(rows.map((r) => [r.playerKey, r.ratingPoints] as const));
-  if (ratingByPlayerKey.size === 0) return src;
+  const byKey = new Map(rows.map((r: any) => [String(r.playerKey).trim(), r] as const));
+  if (byKey.size === 0) return src;
 
   let changed = false;
   const next: Record<string, any> = { ...src };
 
   for (const playerKey of playerKeys) {
-    if (!ratingByPlayerKey.has(playerKey)) continue;
-    const ratingPoints = ratingByPlayerKey.get(playerKey);
+    const row = byKey.get(playerKey);
+    if (!row) continue;
+
+    const ratingPoints = typeof row.ratingPoints === 'number' ? row.ratingPoints : 0;
+    const claimedByUserId = row.claimedByUserId ? String(row.claimedByUserId).trim() : null;
+    const profileDisplayName = row.displayName ? String(row.displayName).trim() : '';
+
     const cur = next[playerKey] ?? {};
-    if (cur?.ratingPoints !== ratingPoints) {
-      next[playerKey] = { ...cur, ratingPoints };
+
+    // OR-identity: always expose profile-based fields even if user is not linked.
+    const patch: any = {
+      ratingPoints,
+      claimedByUserId,
+    };
+
+    // Prefer profile displayName if present; otherwise keep existing map payload name.
+    if (profileDisplayName) patch.displayName = profileDisplayName;
+
+    // Provide a stable avatarUrl for UI (local sprite convention)
+    patch.avatarUrl = `/people/${encodeURIComponent(playerKey)}.png`;
+
+    // Apply only if something changed
+    const nextObj = { ...cur, ...patch };
+    if (JSON.stringify(nextObj) !== JSON.stringify(cur)) {
+      next[playerKey] = nextObj;
       changed = true;
     }
   }
