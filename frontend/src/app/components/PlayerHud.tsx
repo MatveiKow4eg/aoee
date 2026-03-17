@@ -185,6 +185,14 @@ export default function PlayerHud({ nickname, ratingPoints, title, tierLabel, av
     return avatarUrlByMapKey(k);
   };
 
+  const fmtSigned = (v: unknown): string => {
+    if (v == null) return "—";
+    if (typeof v !== "number" || !Number.isFinite(v)) return "—";
+    if (v > 0) return `+${Math.round(v)}`;
+    if (v < 0) return `${Math.round(v)}`;
+    return "0";
+  };
+
   const resolveHistoryParticipant = (opts: {
     user?: any | null;
     userIdFallback?: string | null;
@@ -223,11 +231,15 @@ export default function PlayerHud({ nickname, ratingPoints, title, tierLabel, av
     const challenger = ch?.challengerUser ?? null;
     const target = ch?.targetUser ?? null;
 
+    const challengerProfile = ch?.challengerProfile ?? null;
+    const targetProfile = ch?.targetProfile ?? null;
+
     // Target name resolution order:
     // 1) target user displayName (claimed/registered user)
-    // 2) map payload by targetPlayerKey (unclaimed player)
-    // 3) targetUserId fallback (legacy)
-    // 4) "?"
+    // 2) targetProfile.displayName (works even when targetUser.id is null)
+    // 3) map payload by targetPlayerKey (unclaimed player)
+    // 4) targetUserId fallback (legacy)
+    // 5) "?"
     const mapKey = typeof ch?.targetPlayerKey === "string" ? ch.targetPlayerKey.trim() : "";
     const mapRec = mapKey && mapPlayers ? (mapPlayers as any)[mapKey] : null;
     const mapName = mapRec ? String((mapRec as any)?.name ?? (mapRec as any)?.nickname ?? "").trim() : "";
@@ -236,14 +248,22 @@ export default function PlayerHud({ nickname, ratingPoints, title, tierLabel, av
       user: challenger,
       userIdFallback: ch?.challengerUserId ?? null,
       playerKey: ch?.challengerPlayerKey ?? null,
-      displayNameFallback: ch?.challengerUserId ?? null,
+      displayNameFallback:
+        (typeof challengerProfile?.displayName === "string" && challengerProfile.displayName.trim())
+          ? challengerProfile.displayName.trim()
+          : ch?.challengerUserId ?? null,
     });
 
     const b = resolveHistoryParticipant({
       user: target,
       userIdFallback: ch?.targetUserId ?? null,
       playerKey: ch?.targetPlayerKey ?? null,
-      displayNameFallback: target?.displayName ?? (mapName || null) ?? ch?.targetUserId ?? null,
+      displayNameFallback:
+        (typeof target?.displayName === "string" && target.displayName.trim())
+          ? target.displayName.trim()
+          : (typeof targetProfile?.displayName === "string" && targetProfile.displayName.trim())
+            ? targetProfile.displayName.trim()
+            : (mapName || null) ?? ch?.targetUserId ?? null,
     });
 
     const aName = a.name;
@@ -251,6 +271,9 @@ export default function PlayerHud({ nickname, ratingPoints, title, tierLabel, av
 
     const aAvatar = a.avatarUrl;
     const bAvatar = b.avatarUrl;
+
+    const aRatingPoints = typeof challengerProfile?.ratingPoints === "number" ? challengerProfile.ratingPoints : null;
+    const bRatingPoints = typeof targetProfile?.ratingPoints === "number" ? targetProfile.ratingPoints : null;
 
     const status = String(ch?.status || "").toUpperCase();
     const result = String(ch?.result || "").toUpperCase();
@@ -304,7 +327,7 @@ export default function PlayerHud({ nickname, ratingPoints, title, tierLabel, av
       }
     }
 
-    return { aName, bName, aAvatar, bAvatar, outcome, when, aDelta, bDelta };
+    return { aName, bName, aAvatar, bAvatar, aRatingPoints, bRatingPoints, outcome, when, aDelta, bDelta };
   };
 
   // TEMP DEBUG: existence check for /people/{key}.png to diagnose missing avatars in history.
@@ -1150,7 +1173,12 @@ export default function PlayerHud({ nickname, ratingPoints, title, tierLabel, av
                                       <div style={{ transform: isHero ? "scale(1.25)" : "scale(1)", transformOrigin: "left center" }}>
                                         <Avatar url={vm.aAvatar} name={vm.aName} />
                                       </div>
-                                      <div style={{ fontWeight: 950, fontSize: isHero ? 20 : 15, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{vm.aName}</div>
+                                      <div style={{ display: "flex", alignItems: "baseline", gap: 8, minWidth: 0 }}>
+                                        <div style={{ fontWeight: 950, fontSize: isHero ? 20 : 15, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{vm.aName}</div>
+                                        <div style={{ fontWeight: 950, fontSize: isHero ? 14 : 12, opacity: 0.85, whiteSpace: "nowrap" }} title="Rating">
+                                          {typeof (vm as any)?.aRatingPoints === "number" ? (vm as any).aRatingPoints : "—"}
+                                        </div>
+                                      </div>
                                     </div>
 
                                     <div style={{ opacity: 0.9, fontWeight: 900, padding: "0 8px", letterSpacing: 1.2, fontSize: isHero ? 16 : 13 }}>VS</div>
@@ -1159,7 +1187,12 @@ export default function PlayerHud({ nickname, ratingPoints, title, tierLabel, av
                                       <div style={{ transform: isHero ? "scale(1.25)" : "scale(1)", transformOrigin: "left center" }}>
                                         <Avatar url={vm.bAvatar} name={vm.bName} />
                                       </div>
-                                      <div style={{ fontWeight: 950, fontSize: isHero ? 20 : 15, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{vm.bName}</div>
+                                      <div style={{ display: "flex", alignItems: "baseline", gap: 8, minWidth: 0 }}>
+                                        <div style={{ fontWeight: 950, fontSize: isHero ? 20 : 15, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{vm.bName}</div>
+                                        <div style={{ fontWeight: 950, fontSize: isHero ? 14 : 12, opacity: 0.85, whiteSpace: "nowrap" }} title="Rating">
+                                          {typeof (vm as any)?.bRatingPoints === "number" ? (vm as any).bRatingPoints : "—"}
+                                        </div>
+                                      </div>
                                     </div>
                                   </div>
 
@@ -1183,12 +1216,12 @@ export default function PlayerHud({ nickname, ratingPoints, title, tierLabel, av
                                       <div style={{ display: "flex", gap: 10, flexWrap: "wrap", justifyContent: "flex-end" }}>
                                         {(vm as any)?.aDelta != null ? (
                                           <div style={{ fontSize: 12, fontWeight: 950, color: (vm as any).aDelta > 0 ? "#2bb673" : "#ffb4b4" }}>
-                                            {vm.aName}: {(vm as any).aDelta > 0 ? "+" : ""}{(vm as any).aDelta}
+                                            {vm.aName}: {fmtSigned((vm as any).aDelta)}
                                           </div>
                                         ) : null}
                                         {(vm as any)?.bDelta != null ? (
                                           <div style={{ fontSize: 12, fontWeight: 950, color: (vm as any).bDelta > 0 ? "#2bb673" : "#ffb4b4" }}>
-                                            {vm.bName}: {(vm as any).bDelta > 0 ? "+" : ""}{(vm as any).bDelta}
+                                            {vm.bName}: {fmtSigned((vm as any).bDelta)}
                                           </div>
                                         ) : null}
                                       </div>
