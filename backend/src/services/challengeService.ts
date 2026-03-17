@@ -1,6 +1,7 @@
 import { prisma } from '../db/prisma';
 import { HttpError } from '../utils/httpError';
 import { CHALLENGE_LOSS_POINTS, CHALLENGE_WIN_POINTS } from '../config/rating';
+import { MapService } from './mapService';
 
 export type ChallengeStatus = 'ACTIVE' | 'COMPLETED' | 'EXPIRED' | 'CANCELLED';
 export type ChallengeResult = 'CHALLENGER_WON' | 'CHALLENGER_LOST' | 'DRAW' | 'NO_SHOW';
@@ -19,6 +20,7 @@ export type CanChallengeResponse = {
 };
 
 export class ChallengeService {
+  private readonly mapService = new MapService();
   /**
    * Lazy expiry: any read path can call this to mark expired challenges.
    * By default, expiry also triggers challenger cooldown.
@@ -403,33 +405,67 @@ export class ChallengeService {
 
     // Enrich users with INTERNAL site avatars.
     // Frontend expects local sprites like /people/u001.png (NOT Steam URLs).
-    const userIdToLegacyPeopleUrl = (userIdRaw: unknown): string | null => {
-      const raw = typeof userIdRaw === 'string' ? userIdRaw.trim() : '';
-      if (!raw) return null;
-
-      // Legacy rule (matches PlayerHud fallback): take first 3 digits from userId, build uXXX.
-      const digits = raw.replace(/\D+/g, '');
-      if (!digits) return null;
-
-      const n = parseInt(digits.slice(0, 3), 10);
-      if (!Number.isFinite(n) || n <= 0) return null;
-
-      return `/people/u${String(n).padStart(3, '0')}.png`;
-    };
-
     const playerKeyToPeopleUrl = (playerKeyRaw: unknown): string | null => {
       const k = typeof playerKeyRaw === 'string' ? playerKeyRaw.trim() : '';
       if (!k) return null;
       return `/people/${encodeURIComponent(k)}.png`;
     };
 
-    return rows.map((ch: any) => {
-      const challengerAvatar =
-        playerKeyToPeopleUrl(ch?.challengerPlayerKey) ?? userIdToLegacyPeopleUrl(ch?.challengerUser?.id ?? ch?.challengerUserId);
+    // Map userId -> playerKey using current map payload + aoe_players claims.
+    // This is needed because userId is CUID (no numeric uXXX derivation).
+    let userIdToPlayerKey = new Map<string, string>();
+    try {
+      const payload = await this.mapService.getMapPayload('default');
+      const players = ((payload as any)?.players ?? {}) as Record<string, any>;
 
-      // targetPlayerKey may be null historically; then fall back to legacy uXXX by user id.
-      const targetAvatar =
-        playerKeyToPeopleUrl(ch?.targetPlayerKey) ?? userIdToLegacyPeopleUrl(ch?.targetUser?.id ?? ch?.targetUserId);
+      const aoeProfileIds: string[] = [];
+      const playerKeyByProfileId = new Map<string, string>();
+
+      for (const [playerKey, rec] of Object.entries(players)) {
+        const aoe = String((rec as any)?.aoeProfileId ?? (rec as any)?.insightsUserId ?? '').trim();
+        if (aoe) {
+          aoeProfileIds.push(aoe);
+          if (!playerKeyByProfileId.has(aoe)) playerKeyByProfileId.set(aoe, String(playerKey));
+        }
+
+        // Fallback: if map payload already has explicit userId
+        const uidRaw = (rec as any)?.userId ?? (rec as any)?.extraJson?.userId ?? (rec as any)?.extra?.userId ?? null;
+        const uid = typeof uidRaw === 'string' ? uidRaw.trim() : '';
+        if (uid && !userIdToPlayerKey.has(uid)) userIdToPlayerKey.set(uid, String(playerKey));
+      }
+
+      const unique = Array.from(new Set(aoeProfileIds.map((x) => String(x).trim()).filter(Boolean)));
+      if (unique.length) {
+        const rowsAoe = await prisma.aoePlayer.findMany({
+          where: { aoeProfileId: { in: unique } },
+          select: { aoeProfileId: true, claimedByUserId: true },
+        });
+
+        for (const r of rowsAoe) {
+          const uid = r.claimedByUserId ? String(r.claimedByUserId).trim() : '';
+          if (!uid) continue;
+          const key = playerKeyByProfileId.get(String(r.aoeProfileId).trim());
+          if (!key) continue;
+          if (!userIdToPlayerKey.has(uid)) userIdToPlayerKey.set(uid, key);
+        }
+      }
+    } catch {
+      // ignore mapping failures; we'll fall back to null avatarUrl
+    }
+
+    return rows.map((ch: any) => {
+      const challengerKey =
+        (typeof ch?.challengerPlayerKey === 'string' && ch.challengerPlayerKey.trim())
+          ? ch.challengerPlayerKey.trim()
+          : userIdToPlayerKey.get(String(ch?.challengerUser?.id ?? ch?.challengerUserId ?? '').trim()) ?? null;
+
+      const targetKey =
+        (typeof ch?.targetPlayerKey === 'string' && ch.targetPlayerKey.trim())
+          ? ch.targetPlayerKey.trim()
+          : userIdToPlayerKey.get(String(ch?.targetUser?.id ?? ch?.targetUserId ?? '').trim()) ?? null;
+
+      const challengerAvatar = playerKeyToPeopleUrl(challengerKey);
+      const targetAvatar = playerKeyToPeopleUrl(targetKey);
 
       return {
         ...ch,
@@ -445,6 +481,9 @@ export class ChallengeService {
               avatarUrl: targetAvatar,
             }
           : null,
+        // Also expose best-effort keys for frontend history rendering.
+        challengerPlayerKey: challengerKey ?? ch?.challengerPlayerKey ?? null,
+        targetPlayerKey: targetKey ?? ch?.targetPlayerKey ?? null,
       };
     });
   }
