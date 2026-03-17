@@ -94,6 +94,9 @@ model User {
   // Optional link to playerKey-based profile (claimed/unclaimed map player identity)
   playerProfiles        PlayerProfile[]
 
+  // Opposite side of PlayerProfile.claimedByUser relation
+  claimedPlayerProfile  PlayerProfile? @relation("PlayerProfileClaim")
+
   @@index([email])
   @@index([challengeCooldownUntil])
   @@index([ratingPoints])
