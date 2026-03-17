@@ -158,11 +158,70 @@ export default function PlayerHud({ nickname, ratingPoints, title, tierLabel, av
     return `/people/${encodeURIComponent(code)}.png`;
   };
 
+  const resolveMapPlayerAvatar = (playerKey: string): string | null => {
+    const k = (playerKey ?? "").toString().trim();
+    if (!k || !mapPlayers) return null;
+    const rec = (mapPlayers as any)[k];
+    if (!rec) return null;
+
+    // Try common avatar fields in map payload (best-effort).
+    const candidates = [
+      rec?.avatarUrl,
+      rec?.portrait,
+      rec?.image,
+      rec?.icon,
+      rec?.avatar,
+      rec?.photoUrl,
+      rec?.photo,
+      rec?.img,
+    ];
+
+    for (const c of candidates) {
+      const s = typeof c === "string" ? c.trim() : "";
+      if (s) return s;
+    }
+
+    // Fallback to local static people sprites by playerKey (u001/u005/...)
+    return avatarUrlByMapKey(k);
+  };
+
+  const resolveHistoryParticipant = (opts: {
+    user?: any | null;
+    userIdFallback?: string | null;
+    playerKey?: string | null;
+    displayNameFallback?: string | null;
+  }) => {
+    const user = opts.user ?? null;
+    const playerKey = typeof opts.playerKey === "string" ? opts.playerKey.trim() : "";
+
+    // Name resolution: keep existing behavior (prefer user.displayName, then provided fallback)
+    const name =
+      (typeof user?.displayName === "string" && user.displayName.trim())
+        ? user.displayName.trim()
+        : (opts.displayNameFallback ?? "").toString().trim() || (opts.userIdFallback ?? "").toString().trim() || "?";
+
+    // Avatar resolution order:
+    // 1) user.avatarUrl
+    // 2) mapPlayers avatar fields by playerKey (or /people/{playerKey}.png fallback)
+    // 3) legacy avatarFromUser (uXXX derived from user id)
+    // 4) null => initials fallback in <Avatar>
+    const fromUser = typeof user?.avatarUrl === "string" ? user.avatarUrl.trim() : "";
+    if (fromUser) return { name, avatarUrl: fromUser };
+
+    if (playerKey) {
+      const fromMap = resolveMapPlayerAvatar(playerKey);
+      if (fromMap) return { name, avatarUrl: fromMap };
+    }
+
+    const legacy = avatarFromUser(user, opts.userIdFallback ?? null);
+    if (legacy) return { name, avatarUrl: legacy };
+
+    return { name, avatarUrl: null };
+  };
+
   const challengeVm = (ch: any) => {
     const challenger = ch?.challengerUser ?? null;
     const target = ch?.targetUser ?? null;
-
-    const aName = challenger?.displayName ?? ch?.challengerUserId ?? "?";
 
     // Target name resolution order:
     // 1) target user displayName (claimed/registered user)
@@ -173,10 +232,25 @@ export default function PlayerHud({ nickname, ratingPoints, title, tierLabel, av
     const mapRec = mapKey && mapPlayers ? (mapPlayers as any)[mapKey] : null;
     const mapName = mapRec ? String((mapRec as any)?.name ?? (mapRec as any)?.nickname ?? "").trim() : "";
 
-    const bName = target?.displayName ?? (mapName || null) ?? ch?.targetUserId ?? "?";
+    const a = resolveHistoryParticipant({
+      user: challenger,
+      userIdFallback: ch?.challengerUserId ?? null,
+      playerKey: ch?.challengerPlayerKey ?? null,
+      displayNameFallback: ch?.challengerUserId ?? null,
+    });
 
-    const aAvatar = avatarUrlByMapKey(ch?.challengerPlayerKey) ?? avatarFromUser(challenger, ch?.challengerUserId ?? null);
-    const bAvatar = avatarUrlByMapKey(ch?.targetPlayerKey) ?? avatarFromUser(target, ch?.targetUserId ?? null);
+    const b = resolveHistoryParticipant({
+      user: target,
+      userIdFallback: ch?.targetUserId ?? null,
+      playerKey: ch?.targetPlayerKey ?? null,
+      displayNameFallback: target?.displayName ?? (mapName || null) ?? ch?.targetUserId ?? null,
+    });
+
+    const aName = a.name;
+    const bName = b.name;
+
+    const aAvatar = a.avatarUrl;
+    const bAvatar = b.avatarUrl;
 
     const status = String(ch?.status || "").toUpperCase();
     const result = String(ch?.result || "").toUpperCase();
