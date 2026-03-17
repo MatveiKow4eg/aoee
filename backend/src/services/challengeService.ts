@@ -414,6 +414,8 @@ export class ChallengeService {
     // Map userId -> playerKey using current map payload + aoe_players claims.
     // This is needed because userId is CUID (no numeric uXXX derivation).
     let userIdToPlayerKey = new Map<string, string>();
+    // playerKey -> displayName (from map payload)
+    let playerKeyToName = new Map<string, string>();
     try {
       const payload = await this.mapService.getMapPayload('default');
       const players = ((payload as any)?.players ?? {}) as Record<string, any>;
@@ -427,6 +429,10 @@ export class ChallengeService {
           aoeProfileIds.push(aoe);
           if (!playerKeyByProfileId.has(aoe)) playerKeyByProfileId.set(aoe, String(playerKey));
         }
+
+        // store display name from map payload
+        const mapName = (rec as any)?.name ?? (rec as any)?.nickname ?? null;
+        if (mapName && !playerKeyToName.has(String(playerKey))) playerKeyToName.set(String(playerKey), String(mapName));
 
         // Fallback: if map payload already has explicit userId
         const uidRaw = (rec as any)?.userId ?? (rec as any)?.extraJson?.userId ?? (rec as any)?.extra?.userId ?? null;
@@ -467,20 +473,23 @@ export class ChallengeService {
       const challengerAvatar = playerKeyToPeopleUrl(challengerKey);
       const targetAvatar = playerKeyToPeopleUrl(targetKey);
 
+      // Build minimal user objects when original relation is null but we have a playerKey
+      const challengerUserObj = ch.challengerUser
+        ? { ...ch.challengerUser, avatarUrl: challengerAvatar }
+        : challengerKey
+          ? { id: null, displayName: playerKeyToName.get(challengerKey) ?? String(challengerKey), avatarUrl: challengerAvatar }
+          : null;
+
+      const targetUserObj = ch.targetUser
+        ? { ...ch.targetUser, avatarUrl: targetAvatar }
+        : targetKey
+          ? { id: null, displayName: playerKeyToName.get(targetKey) ?? String(targetKey), avatarUrl: targetAvatar }
+          : null;
+
       return {
         ...ch,
-        challengerUser: ch.challengerUser
-          ? {
-              ...ch.challengerUser,
-              avatarUrl: challengerAvatar,
-            }
-          : null,
-        targetUser: ch.targetUser
-          ? {
-              ...ch.targetUser,
-              avatarUrl: targetAvatar,
-            }
-          : null,
+        challengerUser: challengerUserObj,
+        targetUser: targetUserObj,
         // Also expose best-effort keys for frontend history rendering.
         challengerPlayerKey: challengerKey ?? ch?.challengerPlayerKey ?? null,
         targetPlayerKey: targetKey ?? ch?.targetPlayerKey ?? null,
