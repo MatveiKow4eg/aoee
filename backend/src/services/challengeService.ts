@@ -26,6 +26,80 @@ const isValidRatingResult = (result: any): result is 'CHALLENGER_WON' | 'CHALLEN
 export class ChallengeService {
   private readonly mapService = new MapService();
 
+  private async resolvePlayerKeyByAoeProfileId(
+    tx: any,
+    aoeProfileIdRaw: unknown
+  ): Promise<{ playerKey: string | null; reason: string }> {
+    const aoeProfileId = typeof aoeProfileIdRaw === 'string' ? aoeProfileIdRaw.trim() : '';
+    if (!aoeProfileId) return { playerKey: null, reason: 'NO_AOE_PROFILE_ID' };
+
+    try {
+      const map = await tx.mapState.findUnique({ where: { slug: 'default' }, select: { id: true } });
+      if (!map) return { playerKey: null, reason: 'MAP_NOT_FOUND' };
+
+      const all = await tx.mapPlayer.findMany({
+        where: { mapStateId: map.id },
+        select: { playerKey: true, extraJson: true },
+      });
+
+      for (const row of all) {
+        const extra = (row?.extraJson ?? {}) as any;
+        const rowAoe = String((extra?.aoeProfileId ?? extra?.insightsUserId ?? '')).trim();
+        if (rowAoe && rowAoe === aoeProfileId) {
+          return { playerKey: String(row.playerKey).trim(), reason: 'OK' };
+        }
+      }
+
+      return { playerKey: null, reason: 'MAP_PLAYER_NOT_FOUND_BY_AOE_PROFILE_ID' };
+    } catch (e: any) {
+      return { playerKey: null, reason: `EXCEPTION_${e?.message ? String(e.message) : 'unknown_error'}` };
+    }
+  }
+
+  private async resolvePlayerKeyByUserId(
+    tx: any,
+    userIdRaw: unknown
+  ): Promise<{ playerKey: string | null; reason: string; aoeProfileId: string | null }> {
+    const userId = typeof userIdRaw === 'string' ? userIdRaw.trim() : '';
+    if (!userId) return { playerKey: null, reason: 'NO_USER_ID', aoeProfileId: null };
+
+    // Resolve aoeProfileId via claim
+    const aoe = await tx.aoePlayer.findFirst({
+      where: { claimedByUserId: userId },
+      select: { aoeProfileId: true },
+    });
+
+    const aoeProfileId = aoe?.aoeProfileId ? String(aoe.aoeProfileId).trim() : '';
+    if (!aoeProfileId) return { playerKey: null, reason: 'NO_CLAIMED_AOE_PROFILE', aoeProfileId: null };
+
+    const r = await this.resolvePlayerKeyByAoeProfileId(tx, aoeProfileId);
+    return { playerKey: r.playerKey, reason: r.playerKey ? 'OK' : `AOE_PROFILE_TO_PLAYERKEY_${r.reason}`, aoeProfileId };
+  }
+
+  private async resolveTargetPlayerKey(
+    tx: any,
+    params: { incomingTargetPlayerKey?: string | null; targetUserId?: string | null; targetAoeProfileId?: string | null }
+  ): Promise<{ targetPlayerKey: string | null; reason: string }> {
+    const incoming = typeof params.incomingTargetPlayerKey === 'string' ? params.incomingTargetPlayerKey.trim() : '';
+    if (incoming) return { targetPlayerKey: incoming, reason: 'FROM_PAYLOAD' };
+
+    const targetUserId = typeof params.targetUserId === 'string' ? params.targetUserId.trim() : '';
+    if (targetUserId) {
+      const r = await this.resolvePlayerKeyByUserId(tx, targetUserId);
+      if (r.playerKey) return { targetPlayerKey: r.playerKey, reason: 'FROM_TARGET_USER_CLAIM' };
+      // keep going: maybe aoeProfileId was provided explicitly
+    }
+
+    const targetAoeProfileId = typeof params.targetAoeProfileId === 'string' ? params.targetAoeProfileId.trim() : '';
+    if (targetAoeProfileId) {
+      const r = await this.resolvePlayerKeyByAoeProfileId(tx, targetAoeProfileId);
+      if (r.playerKey) return { targetPlayerKey: r.playerKey, reason: 'FROM_TARGET_AOE_PROFILE_ID' };
+      return { targetPlayerKey: null, reason: `CANNOT_RESOLVE_BY_AOE_PROFILE_ID_${r.reason}` };
+    }
+
+    return { targetPlayerKey: null, reason: 'NO_INPUTS' };
+  }
+
   /**
    * Apply rating for a resolved challenge.
    *
@@ -420,6 +494,30 @@ export class ChallengeService {
       // ignore
     }
 
+    // Resolve targetPlayerKey with strict priority:
+    // a) payload
+    // b) targetUserId -> claim -> aoeProfileId -> map playerKey
+    // c) targetAoeProfileId -> map playerKey
+    const targetKeyRes = await this.resolveTargetPlayerKey(prisma, {
+      incomingTargetPlayerKey: targetPlayerKey,
+      targetUserId,
+      targetAoeProfileId,
+    });
+
+    const resolvedTargetPlayerKey = targetKeyRes.targetPlayerKey;
+
+    // TEMP debug log (required by task)
+    if (String(process.env.DEBUG_CHALLENGES || '').trim() === '1') {
+      console.log('[challenge][create][resolve-target-key]', {
+        challengerUserId,
+        targetUserId: targetUserId ?? null,
+        incomingTargetPlayerKey: targetPlayerKey ?? null,
+        incomingTargetAoeProfileId: targetAoeProfileId ?? null,
+        resolvedTargetPlayerKey: resolvedTargetPlayerKey ?? null,
+        reason: targetKeyRes.reason,
+      });
+    }
+
     const data: any = {
       challengerUserId,
       challengerPlayerKey,
@@ -430,7 +528,7 @@ export class ChallengeService {
     };
 
     if (targetUserId) data.targetUserId = targetUserId;
-    if (targetPlayerKey) data.targetPlayerKey = targetPlayerKey;
+    if (resolvedTargetPlayerKey) data.targetPlayerKey = resolvedTargetPlayerKey;
     if (targetAoeProfileId) data.targetAoeProfileId = targetAoeProfileId;
 
     // Final defensive FK guard (covers any future targetUserId assignment paths)
