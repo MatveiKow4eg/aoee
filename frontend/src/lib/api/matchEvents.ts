@@ -69,3 +69,9 @@ export async function adminCancelMatchEvent(id: string, body?: { notes?: string 
     body: JSON.stringify(body || {}),
   });
 }
+
+export async function adminDeleteMatchEvent(id: string) {
+  return apiFetch(`/api/admin/match-events/${encodeURIComponent(id)}`, {
+    method: "DELETE",
+  });
+}

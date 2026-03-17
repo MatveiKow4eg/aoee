@@ -321,4 +321,28 @@ export class MatchEventService {
 
     return updated;
   }
+
+  /**
+   * Permanently delete a match event and all its participants.
+   * Admin-only.
+   */
+  async adminDelete(params: { eventId: string; adminUserId: string }) {
+    const eventId = typeof params.eventId === 'string' ? params.eventId.trim() : '';
+    if (!eventId) throw new HttpError(400, 'INVALID_ID', 'eventId is required');
+
+    // Note: rating events are not linked to match events (we reuse PlayerRatingEvent with challengeId=null),
+    // so deleting a match event does NOT rollback rating history.
+    // This is intentional for minimal design.
+
+    return prisma.$transaction(async (tx) => {
+      // Ensure exists
+      const ev = await tx.matchEvent.findUnique({ where: { id: eventId }, select: { id: true } });
+      if (!ev) throw new HttpError(404, 'NOT_FOUND', 'Match event not found');
+
+      await tx.matchEventParticipant.deleteMany({ where: { eventId } });
+      await tx.matchEvent.delete({ where: { id: eventId } });
+
+      return { deleted: true };
+    });
+  }
 }

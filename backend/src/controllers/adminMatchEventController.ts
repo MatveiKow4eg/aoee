@@ -78,3 +78,16 @@ export const adminCancelMatchEvent: RequestHandler = async (req, res, next) => {
     next(e);
   }
 };
+
+export const adminDeleteMatchEvent: RequestHandler = async (req, res, next) => {
+  try {
+    const adminUserId = requireAdminUserId(req);
+    const id = typeof req.params.id === 'string' ? req.params.id.trim() : '';
+    if (!id) throw new HttpError(400, 'INVALID_ID', 'id is required');
+
+    const r = await svc.adminDelete({ eventId: id, adminUserId });
+    res.json(r);
+  } catch (e) {
+    next(e);
+  }
+};

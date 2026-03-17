@@ -232,10 +232,10 @@ export default function PlayerHud({ nickname, ratingPoints, title, tierLabel, av
     return { name, avatarUrl: null };
   };
 
-  const challengeVm = (ch: any) => {
+  const challengeVm = (item: any) => {
     // Unified history item wrapper: { type, createdAt, data }
-    const itemType = String(ch?.type || "");
-    const data = itemType ? (ch?.data ?? null) : ch;
+    const itemType = String(item?.type || "");
+    const data = itemType ? (item?.data ?? null) : item;
 
     // Match event rendering path
     if (itemType === "matchEvent") {
@@ -248,11 +248,26 @@ export default function PlayerHud({ nickname, ratingPoints, title, tierLabel, av
         .filter((p: any) => String(p?.side || "").toUpperCase() === "B")
         .sort((x: any, y: any) => (x.slot ?? 0) - (y.slot ?? 0));
 
-      const aName = a.map((p: any) => String(p?.displayNameSnapshot || p?.playerKey || "?").trim()).filter(Boolean).join(", ") || "Team A";
-      const bName = b.map((p: any) => String(p?.displayNameSnapshot || p?.playerKey || "?").trim()).filter(Boolean).join(", ") || "Team B";
+      const teamAName = "Team A";
+      const teamBName = "Team B";
 
-      const aAvatar = a[0]?.avatarUrlSnapshot ? String(a[0].avatarUrlSnapshot) : (a[0]?.playerKey ? `/people/${encodeURIComponent(String(a[0].playerKey))}.png` : null);
-      const bAvatar = b[0]?.avatarUrlSnapshot ? String(b[0].avatarUrlSnapshot) : (b[0]?.playerKey ? `/people/${encodeURIComponent(String(b[0].playerKey))}.png` : null);
+      const aAvatars = a
+        .map((p: any) => {
+          const snap = typeof p?.avatarUrlSnapshot === "string" ? String(p.avatarUrlSnapshot).trim() : "";
+          if (snap) return snap;
+          const key = typeof p?.playerKey === "string" ? p.playerKey.trim() : "";
+          return key ? `/people/${encodeURIComponent(key)}.png` : null;
+        })
+        .filter(Boolean) as string[];
+
+      const bAvatars = b
+        .map((p: any) => {
+          const snap = typeof p?.avatarUrlSnapshot === "string" ? String(p.avatarUrlSnapshot).trim() : "";
+          if (snap) return snap;
+          const key = typeof p?.playerKey === "string" ? p.playerKey.trim() : "";
+          return key ? `/people/${encodeURIComponent(key)}.png` : null;
+        })
+        .filter(Boolean) as string[];
 
       const status = String((ev as any)?.status || "").toUpperCase();
       const winnerSide = (ev as any)?.winnerSide ? String((ev as any).winnerSide).toUpperCase() : null;
@@ -286,7 +301,19 @@ export default function PlayerHud({ nickname, ratingPoints, title, tierLabel, av
       const aDelta = ratingWasApplied && winnerSide ? (winnerSide === "A" ? +20 : -10) : null;
       const bDelta = ratingWasApplied && winnerSide ? (winnerSide === "B" ? +20 : -10) : null;
 
-      return { aName, bName, aAvatar, bAvatar, outcome, when, challengerDelta: aDelta, targetDelta: bDelta };
+      return {
+        aName: teamAName,
+        bName: teamBName,
+        aAvatar: aAvatars[0] ?? null,
+        bAvatar: bAvatars[0] ?? null,
+        aAvatars,
+        bAvatars,
+        outcome,
+        when,
+        challengerDelta: aDelta,
+        targetDelta: bDelta,
+        isTeamMatch: true,
+      };
     }
 
     // Challenge rendering path (existing)
@@ -296,36 +323,39 @@ export default function PlayerHud({ nickname, ratingPoints, title, tierLabel, av
     const challengerProfile = data?.challengerProfile ?? null;
     const targetProfile = data?.targetProfile ?? null;
 
+    const challengerPlayerKey = typeof data?.challengerPlayerKey === "string" ? data.challengerPlayerKey.trim() : "";
+    const targetPlayerKey = typeof data?.targetPlayerKey === "string" ? data.targetPlayerKey.trim() : "";
+
     // Target name resolution order:
     // 1) target user displayName (claimed/registered user)
     // 2) targetProfile.displayName (works even when targetUser.id is null)
     // 3) map payload by targetPlayerKey (unclaimed player)
     // 4) targetUserId fallback (legacy)
     // 5) "?"
-    const mapKey = typeof ch?.targetPlayerKey === "string" ? ch.targetPlayerKey.trim() : "";
+    const mapKey = targetPlayerKey;
     const mapRec = mapKey && mapPlayers ? (mapPlayers as any)[mapKey] : null;
     const mapName = mapRec ? String((mapRec as any)?.name ?? (mapRec as any)?.nickname ?? "").trim() : "";
 
     const a = resolveHistoryParticipant({
       user: challenger,
-      userIdFallback: ch?.challengerUserId ?? null,
-      playerKey: ch?.challengerPlayerKey ?? null,
+      userIdFallback: data?.challengerUserId ?? null,
+      playerKey: challengerPlayerKey || null,
       displayNameFallback:
         (typeof challengerProfile?.displayName === "string" && challengerProfile.displayName.trim())
           ? challengerProfile.displayName.trim()
-          : ch?.challengerUserId ?? null,
+          : data?.challengerUserId ?? null,
     });
 
     const b = resolveHistoryParticipant({
       user: target,
-      userIdFallback: ch?.targetUserId ?? null,
-      playerKey: ch?.targetPlayerKey ?? null,
+      userIdFallback: data?.targetUserId ?? null,
+      playerKey: targetPlayerKey || null,
       displayNameFallback:
         (typeof target?.displayName === "string" && target.displayName.trim())
           ? target.displayName.trim()
           : (typeof targetProfile?.displayName === "string" && targetProfile.displayName.trim())
             ? targetProfile.displayName.trim()
-            : (mapName || null) ?? ch?.targetUserId ?? null,
+            : (mapName || null) ?? data?.targetUserId ?? null,
     });
 
     const aName = a.name;
@@ -1135,57 +1165,7 @@ export default function PlayerHud({ nickname, ratingPoints, title, tierLabel, av
                             .map((ch, idx) => {
                               const vm = challengeVm(ch);
 
-                              // TEMP DEBUG: log only in history modal and only for suspicious/missing avatars.
-                              // Suspicious = derived /people/*.png (may not exist) or empty.
-                              const aUrl = vm.aAvatar;
-                              const bUrl = vm.bAvatar;
-                              const isSuspicious = (u: any) => {
-                                const s = typeof u === "string" ? u.trim() : "";
-                                if (!s) return true;
-                                return s.startsWith("/people/") && s.endsWith(".png");
-                              };
-
-                              if (historyModalOpen && (isSuspicious(aUrl) || isSuspicious(bUrl))) {
-                                // Fire-and-forget async checks; keep logs grouped.
-                                (async () => {
-                                  const challengerUser = ch?.challengerUser ?? null;
-                                  const targetUser = ch?.targetUser ?? null;
-
-                                  const challengerPlayerKey = typeof ch?.challengerPlayerKey === "string" ? ch.challengerPlayerKey.trim() : "";
-                                  const targetPlayerKey = typeof ch?.targetPlayerKey === "string" ? ch.targetPlayerKey.trim() : "";
-
-                                  const mapChallenger = challengerPlayerKey && mapPlayers ? (mapPlayers as any)[challengerPlayerKey] : null;
-                                  const mapTarget = targetPlayerKey && mapPlayers ? (mapPlayers as any)[targetPlayerKey] : null;
-
-                                  const aPeopleExists = typeof aUrl === "string" && aUrl.startsWith("/people/") ? await checkPeoplePngExists(aUrl) : null;
-                                  const bPeopleExists = typeof bUrl === "string" && bUrl.startsWith("/people/") ? await checkPeoplePngExists(bUrl) : null;
-
-                                  // eslint-disable-next-line no-console
-                                  console.groupCollapsed(
-                                    `[history-avatar-debug] ch=${String(ch?.id ?? "?")} idx=${idx} a=${vm.aName} b=${vm.bName}`
-                                  );
-                                  // eslint-disable-next-line no-console
-                                  console.log({
-                                    challengeId: ch?.id ?? null,
-                                    challengerUser_displayName: challengerUser?.displayName ?? null,
-                                    targetUser_displayName: targetUser?.displayName ?? null,
-                                    challengerUser_avatarUrl: challengerUser?.avatarUrl ?? null,
-                                    targetUser_avatarUrl: targetUser?.avatarUrl ?? null,
-                                    challengerPlayerKey: challengerPlayerKey || null,
-                                    targetPlayerKey: targetPlayerKey || null,
-                                    mapPlayers_challenger: mapChallenger,
-                                    mapPlayers_target: mapTarget,
-                                    vm_aAvatar: vm.aAvatar,
-                                    vm_bAvatar: vm.bAvatar,
-                                    vm_aName: vm.aName,
-                                    vm_bName: vm.bName,
-                                    peoplePngExists_a: aPeopleExists,
-                                    peoplePngExists_b: bPeopleExists,
-                                  });
-                                  // eslint-disable-next-line no-console
-                                  console.groupEnd();
-                                })();
-                              }
+                              // (debug avatar logging removed; it assumed challenge-only shape and could break on match events)
 
                               const badgeBg =
                                 vm.outcome.tone === "win"
@@ -1206,6 +1186,35 @@ export default function PlayerHud({ nickname, ratingPoints, title, tierLabel, av
 
                               const isHero = !historyExpanded && idx < 3;
 
+                              const isTeamMatch = !!(vm as any)?.isTeamMatch;
+                              const aAvatars = (vm as any)?.aAvatars as string[] | undefined;
+                              const bAvatars = (vm as any)?.bAvatars as string[] | undefined;
+
+                              const SmallAvatar = ({ url, title }: { url: string; title?: string }) => (
+                                <div
+                                  title={title}
+                                  style={{
+                                    width: 22,
+                                    height: 22,
+                                    borderRadius: 999,
+                                    overflow: "hidden",
+                                    border: "1px solid rgba(202,162,77,0.45)",
+                                    background: "rgba(255,255,255,0.06)",
+                                  }}
+                                >
+                                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                                  <img src={url} alt="" style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }} />
+                                </div>
+                              );
+
+                              const TeamStack = ({ urls }: { urls: string[] }) => (
+                                <div style={{ display: "flex", flexDirection: "column", gap: 4, alignItems: "center" }}>
+                                  {urls.slice(0, 8).map((u, i) => (
+                                    <SmallAvatar key={`${u}-${i}`} url={u} />
+                                  ))}
+                                </div>
+                              );
+
                               return (
                                 <div
                                   key={String(ch?.id || idx)}
@@ -1224,7 +1233,7 @@ export default function PlayerHud({ nickname, ratingPoints, title, tierLabel, av
                                   <div style={{ display: "flex", alignItems: "center", gap: isHero ? 18 : 12, minWidth: 0 }}>
                                     <div style={{ display: "flex", alignItems: "center", gap: 12, minWidth: 0 }}>
                                       <div style={{ transform: isHero ? "scale(1.25)" : "scale(1)", transformOrigin: "left center" }}>
-                                        <Avatar url={vm.aAvatar} name={vm.aName} />
+                                        {isTeamMatch && Array.isArray(aAvatars) && aAvatars.length > 0 ? <TeamStack urls={aAvatars} /> : <Avatar url={vm.aAvatar} name={vm.aName} />}
                                       </div>
                                       <div style={{ fontWeight: 950, fontSize: isHero ? 20 : 15, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{vm.aName}</div>
                                     </div>
@@ -1233,7 +1242,7 @@ export default function PlayerHud({ nickname, ratingPoints, title, tierLabel, av
 
                                     <div style={{ display: "flex", alignItems: "center", gap: 12, minWidth: 0 }}>
                                       <div style={{ transform: isHero ? "scale(1.25)" : "scale(1)", transformOrigin: "left center" }}>
-                                        <Avatar url={vm.bAvatar} name={vm.bName} />
+                                        {isTeamMatch && Array.isArray(bAvatars) && bAvatars.length > 0 ? <TeamStack urls={bAvatars} /> : <Avatar url={vm.bAvatar} name={vm.bName} />}
                                       </div>
                                       <div style={{ fontWeight: 950, fontSize: isHero ? 20 : 15, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{vm.bName}</div>
                                     </div>
@@ -1259,12 +1268,12 @@ export default function PlayerHud({ nickname, ratingPoints, title, tierLabel, av
                                       <div style={{ display: "flex", gap: 10, flexWrap: "wrap", justifyContent: "flex-end" }}>
                                         {(vm as any)?.challengerDelta != null ? (
                                           <div style={{ fontSize: 12, fontWeight: 950, color: (vm as any).challengerDelta > 0 ? "#2bb673" : "#ffb4b4" }}>
-                                            {vm.aName}: {fmtSigned((vm as any).challengerDelta)}
+                                            {isTeamMatch ? "Team A" : vm.aName}: {fmtSigned((vm as any).challengerDelta)}
                                           </div>
                                         ) : null}
                                         {(vm as any)?.targetDelta != null ? (
                                           <div style={{ fontSize: 12, fontWeight: 950, color: (vm as any).targetDelta > 0 ? "#2bb673" : "#ffb4b4" }}>
-                                            {vm.bName}: {fmtSigned((vm as any).targetDelta)}
+                                            {isTeamMatch ? "Team B" : vm.bName}: {fmtSigned((vm as any).targetDelta)}
                                           </div>
                                         ) : null}
                                       </div>
