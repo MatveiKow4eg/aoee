@@ -1,6 +1,7 @@
 import { prisma } from '../db/prisma';
 import { HttpError } from '../utils/httpError';
 import { CHALLENGE_LOSS_POINTS, CHALLENGE_WIN_POINTS } from '../config/rating';
+import { AuthRepository } from '../repositories/authRepository';
 
 export type ChallengeStatus = 'ACTIVE' | 'COMPLETED' | 'EXPIRED' | 'CANCELLED';
 export type ChallengeResult = 'CHALLENGER_WON' | 'CHALLENGER_LOST' | 'DRAW' | 'NO_SHOW';
@@ -19,6 +20,7 @@ export type CanChallengeResponse = {
 };
 
 export class ChallengeService {
+  constructor(private readonly authRepo = new AuthRepository()) {}
   /**
    * Lazy expiry: any read path can call this to mark expired challenges.
    * By default, expiry also triggers challenger cooldown.
@@ -392,13 +394,58 @@ export class ChallengeService {
   async listChallengeHistory(filter: { status?: ChallengeStatus } = {}) {
     await this.expireOverdueChallenges(new Date());
 
-    return prisma.userChallenge.findMany({
+    const rows = await prisma.userChallenge.findMany({
       where: filter.status ? { status: filter.status } : undefined,
       orderBy: { createdAt: 'desc' },
+      // Keep base shape stable; just enrich nested users with avatarUrl.
       include: {
         challengerUser: { select: { id: true, displayName: true } },
         targetUser: { select: { id: true, displayName: true } },
       },
+    });
+
+    // Enrich users with avatarUrl (Steam avatar) for history rendering.
+    // NOTE: avatarUrl is not stored in users table; it is derived from linked Steam account.
+    const userIds = Array.from(
+      new Set(
+        rows
+          .flatMap((ch: any) => [ch?.challengerUser?.id ?? null, ch?.targetUser?.id ?? null])
+          .filter((x: any) => typeof x === 'string' && x.trim())
+          .map((x: any) => String(x).trim())
+      )
+    );
+
+    const avatarByUserId = new Map<string, string | null>();
+    await Promise.all(
+      userIds.map(async (id) => {
+        try {
+          const url = await this.authRepo.getSteamAvatarUrlByUserId(id);
+          avatarByUserId.set(id, url);
+        } catch {
+          avatarByUserId.set(id, null);
+        }
+      })
+    );
+
+    return rows.map((ch: any) => {
+      const challengerId = ch?.challengerUser?.id ? String(ch.challengerUser.id) : null;
+      const targetId = ch?.targetUser?.id ? String(ch.targetUser.id) : null;
+
+      return {
+        ...ch,
+        challengerUser: ch.challengerUser
+          ? {
+              ...ch.challengerUser,
+              avatarUrl: challengerId ? (avatarByUserId.get(challengerId) ?? null) : null,
+            }
+          : null,
+        targetUser: ch.targetUser
+          ? {
+              ...ch.targetUser,
+              avatarUrl: targetId ? (avatarByUserId.get(targetId) ?? null) : null,
+            }
+          : null,
+      };
     });
   }
 
