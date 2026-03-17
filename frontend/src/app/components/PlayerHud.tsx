@@ -272,9 +272,6 @@ export default function PlayerHud({ nickname, ratingPoints, title, tierLabel, av
     const aAvatar = a.avatarUrl;
     const bAvatar = b.avatarUrl;
 
-    const aRatingPoints = typeof challengerProfile?.ratingPoints === "number" ? challengerProfile.ratingPoints : null;
-    const bRatingPoints = typeof targetProfile?.ratingPoints === "number" ? targetProfile.ratingPoints : null;
-
     const status = String(ch?.status || "").toUpperCase();
     const result = String(ch?.result || "").toUpperCase();
 
@@ -300,34 +297,28 @@ export default function PlayerHud({ nickname, ratingPoints, title, tierLabel, av
         })()
       : "";
 
-    // Rating delta display
-    // IMPORTANT: show deltas ONLY when backend actually applied rating (ratingAppliedAt != null).
-    // Otherwise we would misleadingly show +20/-10 for matches where rating wasn't processed.
+    // Match rating delta display
+    // Show deltas ONLY when backend actually applied rating (ratingAppliedAt != null).
     const winDelta = +20;
     const lossDelta = -10;
 
-    let aDelta: number | null = null;
-    let bDelta: number | null = null;
+    let challengerDelta: number | null = null;
+    let targetDelta: number | null = null;
 
     const ratingAppliedAt = ch?.ratingAppliedAt ?? (ch as any)?.rating_applied_at ?? null;
     const ratingWasApplied = !!ratingAppliedAt;
 
     if (ratingWasApplied && status === "COMPLETED" && (result === "CHALLENGER_WON" || result === "CHALLENGER_LOST")) {
       if (result === "CHALLENGER_WON") {
-        aDelta = winDelta;
-        bDelta = lossDelta;
+        challengerDelta = winDelta;
+        targetDelta = lossDelta;
       } else {
-        aDelta = lossDelta;
-        bDelta = winDelta;
-      }
-
-      // Defensive: if target user is not registered (targetUserId is null), don't show rating deltas.
-      if (!ch?.targetUserId) {
-        bDelta = null;
+        challengerDelta = lossDelta;
+        targetDelta = winDelta;
       }
     }
 
-    return { aName, bName, aAvatar, bAvatar, aRatingPoints, bRatingPoints, outcome, when, aDelta, bDelta };
+    return { aName, bName, aAvatar, bAvatar, outcome, when, challengerDelta, targetDelta };
   };
 
   // TEMP DEBUG: existence check for /people/{key}.png to diagnose missing avatars in history.
@@ -1173,12 +1164,7 @@ export default function PlayerHud({ nickname, ratingPoints, title, tierLabel, av
                                       <div style={{ transform: isHero ? "scale(1.25)" : "scale(1)", transformOrigin: "left center" }}>
                                         <Avatar url={vm.aAvatar} name={vm.aName} />
                                       </div>
-                                      <div style={{ display: "flex", alignItems: "baseline", gap: 8, minWidth: 0 }}>
-                                        <div style={{ fontWeight: 950, fontSize: isHero ? 20 : 15, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{vm.aName}</div>
-                                        <div style={{ fontWeight: 950, fontSize: isHero ? 14 : 12, opacity: 0.85, whiteSpace: "nowrap" }} title="Rating">
-                                          {typeof (vm as any)?.aRatingPoints === "number" ? (vm as any).aRatingPoints : "—"}
-                                        </div>
-                                      </div>
+                                      <div style={{ fontWeight: 950, fontSize: isHero ? 20 : 15, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{vm.aName}</div>
                                     </div>
 
                                     <div style={{ opacity: 0.9, fontWeight: 900, padding: "0 8px", letterSpacing: 1.2, fontSize: isHero ? 16 : 13 }}>VS</div>
@@ -1187,12 +1173,7 @@ export default function PlayerHud({ nickname, ratingPoints, title, tierLabel, av
                                       <div style={{ transform: isHero ? "scale(1.25)" : "scale(1)", transformOrigin: "left center" }}>
                                         <Avatar url={vm.bAvatar} name={vm.bName} />
                                       </div>
-                                      <div style={{ display: "flex", alignItems: "baseline", gap: 8, minWidth: 0 }}>
-                                        <div style={{ fontWeight: 950, fontSize: isHero ? 20 : 15, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{vm.bName}</div>
-                                        <div style={{ fontWeight: 950, fontSize: isHero ? 14 : 12, opacity: 0.85, whiteSpace: "nowrap" }} title="Rating">
-                                          {typeof (vm as any)?.bRatingPoints === "number" ? (vm as any).bRatingPoints : "—"}
-                                        </div>
-                                      </div>
+                                      <div style={{ fontWeight: 950, fontSize: isHero ? 20 : 15, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{vm.bName}</div>
                                     </div>
                                   </div>
 
@@ -1212,16 +1193,16 @@ export default function PlayerHud({ nickname, ratingPoints, title, tierLabel, av
                                     </div>
                                     {vm.when ? <div style={{ opacity: 0.7, fontSize: isHero ? 13 : 12, textAlign: "right" }}>{vm.when}</div> : null}
 
-                                    {(vm as any)?.aDelta != null || (vm as any)?.bDelta != null ? (
+                                    {(vm as any)?.challengerDelta != null || (vm as any)?.targetDelta != null ? (
                                       <div style={{ display: "flex", gap: 10, flexWrap: "wrap", justifyContent: "flex-end" }}>
-                                        {(vm as any)?.aDelta != null ? (
-                                          <div style={{ fontSize: 12, fontWeight: 950, color: (vm as any).aDelta > 0 ? "#2bb673" : "#ffb4b4" }}>
-                                            {vm.aName}: {fmtSigned((vm as any).aDelta)}
+                                        {(vm as any)?.challengerDelta != null ? (
+                                          <div style={{ fontSize: 12, fontWeight: 950, color: (vm as any).challengerDelta > 0 ? "#2bb673" : "#ffb4b4" }}>
+                                            {vm.aName}: {fmtSigned((vm as any).challengerDelta)}
                                           </div>
                                         ) : null}
-                                        {(vm as any)?.bDelta != null ? (
-                                          <div style={{ fontSize: 12, fontWeight: 950, color: (vm as any).bDelta > 0 ? "#2bb673" : "#ffb4b4" }}>
-                                            {vm.bName}: {fmtSigned((vm as any).bDelta)}
+                                        {(vm as any)?.targetDelta != null ? (
+                                          <div style={{ fontSize: 12, fontWeight: 950, color: (vm as any).targetDelta > 0 ? "#2bb673" : "#ffb4b4" }}>
+                                            {vm.bName}: {fmtSigned((vm as any).targetDelta)}
                                           </div>
                                         ) : null}
                                       </div>
