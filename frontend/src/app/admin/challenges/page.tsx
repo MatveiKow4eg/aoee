@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { adminCancelChallenge, adminListChallenges, adminResolveChallenge } from "../../../lib/api/challenges";
+import { adminCancelChallenge, adminDeleteChallenges, adminListChallenges, adminResolveChallenge } from "../../../lib/api/challenges";
 
 type Tab = "ACTIVE" | "COMPLETED" | "EXPIRED" | "CANCELLED";
 
@@ -18,6 +18,7 @@ export default function AdminChallengesPage() {
   const [tab, setTab] = useState<Tab>("ACTIVE");
   const [state, setState] = useState<{ status: "loading" } | { status: "ok"; items: any[] } | { status: "error"; message: string }>({ status: "loading" });
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [selectedIds, setSelectedIds] = useState<Record<string, boolean>>({});
 
   const title = useMemo(() => {
     if (tab === "ACTIVE") return "Вызовы: Active";
@@ -31,6 +32,7 @@ export default function AdminChallengesPage() {
     try {
       const r = await adminListChallenges(t);
       setState({ status: "ok", items: (r as any)?.challenges ?? [] });
+      setSelectedIds({});
     } catch (e: any) {
       setState({ status: "error", message: e?.message ? String(e.message) : "Failed to load" });
     }
@@ -46,6 +48,38 @@ export default function AdminChallengesPage() {
         <div className="aoe-bar">
           <div className="aoe-title" style={{ fontSize: 18 }}>{title}</div>
           <div className="aoe-spacer" />
+          <button
+            onClick={async () => {
+              const ids = Object.entries(selectedIds)
+                .filter(([, v]) => !!v)
+                .map(([id]) => id);
+
+              if (ids.length === 0) {
+                alert("Select at least one challenge");
+                return;
+              }
+
+              if (!confirm(`Delete selected challenges (${ids.length})? This cannot be undone.`)) return;
+
+              try {
+                const r = await adminDeleteChallenges(ids);
+                alert(
+                  `Deleted challenges: ${r.challengesDeleted}\nDeleted user rating events: ${r.userRatingEventsDeleted}\nDeleted player rating events: ${r.playerRatingEventsDeleted}`
+                );
+                await load(tab);
+              } catch (e: any) {
+                alert(e?.message ? String(e.message) : "Failed to delete challenges");
+              }
+            }}
+            className="aoe-btn"
+            style={{
+              background: "linear-gradient(180deg, rgba(244, 63, 94, 1) 0%, rgba(190, 18, 60, 1) 100%)",
+              color: "#fff1f2",
+            }}
+            title="Delete selected challenges"
+          >
+            Delete selected
+          </button>
           <button onClick={() => load(tab)} className="aoe-btn">Refresh</button>
         </div>
 
@@ -83,6 +117,14 @@ export default function AdminChallengesPage() {
                         boxShadow: "0 10px 24px rgba(0,0,0,0.25)",
                       }}
                     >
+                      <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8 }}>
+                        <input
+                          type="checkbox"
+                          checked={!!selectedIds[ch.id]}
+                          onChange={() => setSelectedIds((prev) => ({ ...prev, [ch.id]: !prev[ch.id] }))}
+                        />
+                        <div style={{ fontSize: 12, opacity: 0.75, fontWeight: 800 }}>select</div>
+                      </div>
                       <div style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
                         <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
                           <div style={{ fontWeight: 900 }}>

@@ -122,6 +122,19 @@ export async function adminCancelChallenge(id: string, notes?: string): Promise<
   });
 }
 
+export async function adminPurgeChallenges(): Promise<{ ok: true; challengesDeleted: number; userRatingEventsDeleted: number; playerRatingEventsDeleted: number }> {
+  return jsonFetch<{ ok: true; challengesDeleted: number; userRatingEventsDeleted: number; playerRatingEventsDeleted: number }>(`/api/admin/challenges/purge`, {
+    method: "POST",
+  });
+}
+
+export async function adminDeleteChallenges(ids: string[]): Promise<{ ok: true; challengesDeleted: number; userRatingEventsDeleted: number; playerRatingEventsDeleted: number }> {
+  return jsonFetch<{ ok: true; challengesDeleted: number; userRatingEventsDeleted: number; playerRatingEventsDeleted: number }>(`/api/admin/challenges/delete`, {
+    method: "POST",
+    body: JSON.stringify({ ids }),
+  });
+}
+
 export type AdminCooldownUser = {
   id: string;
   displayName: string | null;

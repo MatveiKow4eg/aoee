@@ -530,4 +530,61 @@ export class ChallengeService {
       });
     });
   }
+
+  /**
+   * DANGEROUS: permanently deletes ALL challenge history from DB.
+   * Admin-only operation.
+   */
+  async adminPurgeAllChallenges() {
+    return prisma.$transaction(async (tx) => {
+      // Delete dependent rating events first (FK safety).
+      // Prisma schema doesn't specify cascade here, so do it explicitly.
+      const userRatingEventsDeleted = await (tx as any).userRatingEvent.deleteMany({
+        where: { challengeId: { not: null } },
+      });
+
+      const playerRatingEventsDeleted = await (tx as any).playerRatingEvent.deleteMany({
+        where: { challengeId: { not: null } },
+      });
+
+      const challengesDeleted = await tx.userChallenge.deleteMany({});
+
+      return {
+        challengesDeleted: challengesDeleted.count ?? 0,
+        userRatingEventsDeleted: userRatingEventsDeleted.count ?? 0,
+        playerRatingEventsDeleted: playerRatingEventsDeleted.count ?? 0,
+      };
+    });
+  }
+
+  /**
+   * Permanently deletes selected challenges by id.
+   * Admin-only operation.
+   */
+  async adminDeleteChallengesByIds(ids: string[]) {
+    const uniq = Array.from(new Set((ids ?? []).map((x) => String(x || '').trim()).filter(Boolean)));
+    if (uniq.length === 0) {
+      return { challengesDeleted: 0, userRatingEventsDeleted: 0, playerRatingEventsDeleted: 0 };
+    }
+
+    return prisma.$transaction(async (tx) => {
+      const userRatingEventsDeleted = await (tx as any).userRatingEvent.deleteMany({
+        where: { challengeId: { in: uniq } },
+      });
+
+      const playerRatingEventsDeleted = await (tx as any).playerRatingEvent.deleteMany({
+        where: { challengeId: { in: uniq } },
+      });
+
+      const challengesDeleted = await tx.userChallenge.deleteMany({
+        where: { id: { in: uniq } },
+      });
+
+      return {
+        challengesDeleted: challengesDeleted.count ?? 0,
+        userRatingEventsDeleted: userRatingEventsDeleted.count ?? 0,
+        playerRatingEventsDeleted: playerRatingEventsDeleted.count ?? 0,
+      };
+    });
+  }
 }

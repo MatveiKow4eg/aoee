@@ -226,3 +226,30 @@ export const postAdminClearCooldown: RequestHandler = async (req, res, next) => 
     next(e);
   }
 };
+
+export const postAdminPurgeChallenges: RequestHandler = async (req, res, next) => {
+  try {
+    const admin = requireAdmin(req as any);
+    void admin;
+
+    const r = await challengeService.adminPurgeAllChallenges();
+    res.json({ ok: true, ...r });
+  } catch (e) {
+    next(e);
+  }
+};
+
+export const postAdminDeleteChallenges: RequestHandler = async (req, res, next) => {
+  try {
+    const admin = requireAdmin(req as any);
+    void admin;
+
+    const ids = (req.body as any)?.ids;
+    if (!Array.isArray(ids)) throw new HttpError(400, 'BAD_REQUEST', 'ids must be an array');
+
+    const r = await challengeService.adminDeleteChallengesByIds(ids as any);
+    res.json({ ok: true, ...r });
+  } catch (e) {
+    next(e);
+  }
+};

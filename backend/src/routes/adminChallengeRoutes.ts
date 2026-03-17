@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import rateLimit from 'express-rate-limit';
 import { requireAuth } from '../middleware/auth';
-import { getAdminChallenges, postAdminCancelChallenge, postAdminResolveChallenge, getAdminCooldownUsers, postAdminClearCooldown } from '../controllers/adminChallengeController';
+import { getAdminChallenges, postAdminCancelChallenge, postAdminResolveChallenge, getAdminCooldownUsers, postAdminClearCooldown, postAdminDeleteChallenges, postAdminPurgeChallenges } from '../controllers/adminChallengeController';
 
 export const adminChallengeRoutes = Router();
 
@@ -18,3 +18,9 @@ adminChallengeRoutes.post('/admin/challenges/:id/cancel', adminLimiter, requireA
 
 adminChallengeRoutes.get('/admin/cooldowns', adminLimiter, requireAuth(), getAdminCooldownUsers);
 adminChallengeRoutes.post('/admin/cooldowns/:userId/clear', adminLimiter, requireAuth(), postAdminClearCooldown);
+
+// Delete selected challenges
+adminChallengeRoutes.post('/admin/challenges/delete', adminLimiter, requireAuth(), postAdminDeleteChallenges);
+
+// DANGEROUS: purge all challenge history (kept for backward-compat / emergency)
+adminChallengeRoutes.post('/admin/challenges/purge', adminLimiter, requireAuth(), postAdminPurgeChallenges);
