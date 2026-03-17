@@ -97,6 +97,11 @@ model User {
   // Opposite side of PlayerProfile.claimedByUser relation
   claimedPlayerProfile  PlayerProfile? @relation("PlayerProfileClaim")
 
+  // Admin-created match events
+  matchEventsCreated    MatchEvent[]            @relation("MatchEventCreatedBy")
+  matchEventsResolved   MatchEvent[]            @relation("MatchEventResolvedBy")
+  matchEventParticipants MatchEventParticipant[]
+
   @@index([email])
   @@index([challengeCooldownUntil])
   @@index([ratingPoints])
