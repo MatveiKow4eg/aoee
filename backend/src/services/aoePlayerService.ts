@@ -16,6 +16,34 @@ const claimSchema = z.object({
 export class AoePlayerService {
   constructor(private readonly repo = new AoePlayerRepository()) {}
 
+  private async resolvePlayerKeyByAoeProfileId(aoeProfileIdRaw: unknown): Promise<{ playerKey: string | null; reason: string }> {
+    const aoeProfileId = typeof aoeProfileIdRaw === 'string' ? aoeProfileIdRaw.trim() : '';
+    if (!aoeProfileId) return { playerKey: null, reason: 'NO_AOE_PROFILE_ID' };
+
+    try {
+      const { prisma } = await import('../db/prisma');
+      const map = await prisma.mapState.findUnique({ where: { slug: 'default' }, select: { id: true } });
+      if (!map) return { playerKey: null, reason: 'MAP_NOT_FOUND' };
+
+      const all = await prisma.mapPlayer.findMany({
+        where: { mapStateId: map.id },
+        select: { playerKey: true, extraJson: true },
+      });
+
+      for (const row of all) {
+        const extra = (row?.extraJson ?? {}) as any;
+        const rowAoe = String((extra?.aoeProfileId ?? extra?.insightsUserId ?? '')).trim();
+        if (rowAoe && rowAoe === aoeProfileId) {
+          return { playerKey: String(row.playerKey).trim(), reason: 'OK' };
+        }
+      }
+
+      return { playerKey: null, reason: 'MAP_PLAYER_NOT_FOUND_BY_AOE_PROFILE_ID' };
+    } catch (e: any) {
+      return { playerKey: null, reason: e?.message ? String(e.message) : 'unknown_error' };
+    }
+  }
+
   async listAvailable(query: unknown) {
     const { q, limit, cursor } = listSchema.parse(query);
     return this.repo.listAvailable({ q, limit, cursor: cursor ?? null });
@@ -64,6 +92,53 @@ export class AoePlayerService {
     if (count !== 1) {
       // race: someone else claimed between checks
       throw new HttpError(409, 'PLAYER_ALREADY_CLAIMED', 'Player already claimed');
+    }
+
+    // OR-identity model: ensure PlayerProfile exists by playerKey and link it to the user.
+    // This must NOT create a new rating identity; it must attach to the existing profile.
+    try {
+      const { prisma } = await import('../db/prisma');
+
+      const keyRes = await this.resolvePlayerKeyByAoeProfileId(aoeProfileId);
+      const playerKey = keyRes.playerKey;
+
+      if (playerKey) {
+        // Ensure profile exists
+        const profile = await (prisma as any).playerProfile.upsert({
+          where: { playerKey },
+          create: {
+            playerKey,
+            aoeProfileId,
+            displayName: safeNickname || undefined,
+          },
+          update: {
+            aoeProfileId,
+            displayName: safeNickname || undefined,
+          },
+        });
+
+        const claimedByUserId = (profile as any).claimedByUserId ? String((profile as any).claimedByUserId).trim() : '';
+
+        if (!claimedByUserId) {
+          await (prisma as any).playerProfile.update({
+            where: { playerKey },
+            data: { claimedByUserId: userId },
+          });
+        } else if (claimedByUserId !== userId) {
+          // Roll back roster claim? We intentionally do NOT attempt rollback here.
+          // Instead, surface conflict so ops can resolve; this should be rare.
+          throw new HttpError(409, 'PLAYER_PROFILE_ALREADY_CLAIMED', 'Player profile already claimed by another user');
+        }
+      } else {
+        // No playerKey found in current map payload; keep roster claim only.
+        // This still allows account ownership, but profile-based rating will appear once playerKey is known.
+        if (String(process.env.DEBUG_CHALLENGES || '').trim() === '1') {
+          console.log('[claim][playerProfile] skip: cannot resolve playerKey', { aoeProfileId, reason: keyRes.reason });
+        }
+      }
+    } catch (e: any) {
+      // Do not break claim flow; log and continue.
+      console.warn('[claim][playerProfile] failed', { aoeProfileId, reason: e?.message ? String(e.message) : 'unknown_error' });
     }
 
     const claimed = await this.repo.findClaimedByUserId(userId);

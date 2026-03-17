@@ -245,16 +245,25 @@ model PlayerProfile {
   id           String   @id @default(cuid())
   playerKey    String   @unique @map("player_key")
   aoeProfileId String?  @map("aoe_profile_id")
+
+  // Optional claim link: when set, this profile is owned by a site user.
+  // OR-identity rule: profile identity is ALWAYS playerKey; claim must never create a new profile.
+  claimedByUserId String? @unique @map("claimed_by_user_id")
+
+  // Legacy optional link (kept for backward compatibility; prefer claimedByUserId).
   userId       String?  @map("user_id")
+
   displayName  String?  @map("display_name")
   ratingPoints Int      @default(0) @map("rating_points")
   createdAt    DateTime @default(now()) @map("created_at")
   updatedAt    DateTime @updatedAt @map("updated_at")
 
+  claimedByUser User?   @relation("PlayerProfileClaim", fields: [claimedByUserId], references: [id], onDelete: SetNull)
   user         User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
   ratingEvents PlayerRatingEvent[]
 
   @@index([aoeProfileId])
+  @@index([claimedByUserId])
   @@index([userId])
   @@index([ratingPoints])
   @@map("player_profiles")
