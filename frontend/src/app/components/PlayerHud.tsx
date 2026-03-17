@@ -116,17 +116,22 @@ export default function PlayerHud({ nickname, ratingPoints, title, tierLabel, av
     setHistorySeed((x) => x + 1);
   };
 
-  // History modal: shows ALL challenges (admin endpoint)
+  // History modal: unified history (solo challenges + admin match events)
   const openHistoryModal = async () => {
     setHistoryExpanded(false);
     setHistoryModalOpen(true);
     setHistoryState({ status: "loading" });
     try {
-      const { listChallengeHistory } = await import("../../lib/api/challenges");
-      const r = await listChallengeHistory();
-      const list = (r as any)?.challenges ?? [];
+      const { listUnifiedHistory } = await import("../../lib/api/history");
+      const r = await listUnifiedHistory();
+      const list = (r as any)?.items ?? [];
       const items = Array.isArray(list) ? list : [];
-      const filtered = items.filter((ch: any) => String(ch?.status || "").toUpperCase() !== "CANCELLED");
+      // Filter cancelled for both types
+      const filtered = items.filter((it: any) => {
+        const t = String(it?.type || "");
+        if (t === "matchEvent") return String(it?.data?.status || "").toUpperCase() !== "CANCELLED";
+        return String(it?.data?.status || "").toUpperCase() !== "CANCELLED";
+      });
       setHistoryState({ status: "ok", challenges: filtered });
     } catch (e: any) {
       setHistoryState({ status: "error", message: e?.message ? String(e.message) : "Failed to load history" });
@@ -228,11 +233,68 @@ export default function PlayerHud({ nickname, ratingPoints, title, tierLabel, av
   };
 
   const challengeVm = (ch: any) => {
-    const challenger = ch?.challengerUser ?? null;
-    const target = ch?.targetUser ?? null;
+    // Unified history item wrapper: { type, createdAt, data }
+    const itemType = String(ch?.type || "");
+    const data = itemType ? (ch?.data ?? null) : ch;
 
-    const challengerProfile = ch?.challengerProfile ?? null;
-    const targetProfile = ch?.targetProfile ?? null;
+    // Match event rendering path
+    if (itemType === "matchEvent") {
+      const ev = data ?? {};
+      const parts = Array.isArray((ev as any)?.participants) ? (ev as any).participants : [];
+      const a = parts
+        .filter((p: any) => String(p?.side || "").toUpperCase() === "A")
+        .sort((x: any, y: any) => (x.slot ?? 0) - (y.slot ?? 0));
+      const b = parts
+        .filter((p: any) => String(p?.side || "").toUpperCase() === "B")
+        .sort((x: any, y: any) => (x.slot ?? 0) - (y.slot ?? 0));
+
+      const aName = a.map((p: any) => String(p?.displayNameSnapshot || p?.playerKey || "?").trim()).filter(Boolean).join(", ") || "Team A";
+      const bName = b.map((p: any) => String(p?.displayNameSnapshot || p?.playerKey || "?").trim()).filter(Boolean).join(", ") || "Team B";
+
+      const aAvatar = a[0]?.avatarUrlSnapshot ? String(a[0].avatarUrlSnapshot) : (a[0]?.playerKey ? `/people/${encodeURIComponent(String(a[0].playerKey))}.png` : null);
+      const bAvatar = b[0]?.avatarUrlSnapshot ? String(b[0].avatarUrlSnapshot) : (b[0]?.playerKey ? `/people/${encodeURIComponent(String(b[0].playerKey))}.png` : null);
+
+      const status = String((ev as any)?.status || "").toUpperCase();
+      const winnerSide = (ev as any)?.winnerSide ? String((ev as any).winnerSide).toUpperCase() : null;
+
+      const outcome =
+        status === "OPEN"
+          ? { label: "Ожидание", tone: "pending" as const }
+          : status === "COMPLETED"
+            ? winnerSide === "A"
+              ? { label: "A won", tone: "win" as const }
+              : winnerSide === "B"
+                ? { label: "B won", tone: "loss" as const }
+                : { label: "Completed", tone: "neutral" as const }
+            : { label: status ? status.toLowerCase() : "—", tone: "neutral" as const };
+
+      const ts = (ev as any)?.createdAt ? String((ev as any).createdAt) : "";
+      const when = ts
+        ? (() => {
+            try {
+              return new Date(ts).toLocaleString();
+            } catch {
+              return ts;
+            }
+          })()
+        : "";
+
+      // Deltas: show per-side if rating was applied
+      const ratingAppliedAt = (ev as any)?.ratingAppliedAt ?? (ev as any)?.rating_applied_at ?? null;
+      const ratingWasApplied = !!ratingAppliedAt;
+
+      const aDelta = ratingWasApplied && winnerSide ? (winnerSide === "A" ? +20 : -10) : null;
+      const bDelta = ratingWasApplied && winnerSide ? (winnerSide === "B" ? +20 : -10) : null;
+
+      return { aName, bName, aAvatar, bAvatar, outcome, when, challengerDelta: aDelta, targetDelta: bDelta };
+    }
+
+    // Challenge rendering path (existing)
+    const challenger = data?.challengerUser ?? null;
+    const target = data?.targetUser ?? null;
+
+    const challengerProfile = data?.challengerProfile ?? null;
+    const targetProfile = data?.targetProfile ?? null;
 
     // Target name resolution order:
     // 1) target user displayName (claimed/registered user)
@@ -272,8 +334,8 @@ export default function PlayerHud({ nickname, ratingPoints, title, tierLabel, av
     const aAvatar = a.avatarUrl;
     const bAvatar = b.avatarUrl;
 
-    const status = String(ch?.status || "").toUpperCase();
-    const result = String(ch?.result || "").toUpperCase();
+    const status = String(data?.status || "").toUpperCase();
+    const result = String(data?.result || "").toUpperCase();
 
     const outcome =
       status === "ACTIVE"
@@ -286,7 +348,7 @@ export default function PlayerHud({ nickname, ratingPoints, title, tierLabel, av
               : { label: result ? result.toLowerCase() : "Completed", tone: "neutral" as const }
           : { label: status ? status.toLowerCase() : "—", tone: "neutral" as const };
 
-    const ts = ch?.createdAt ? String(ch.createdAt) : "";
+    const ts = data?.createdAt ? String(data.createdAt) : "";
     const when = ts
       ? (() => {
           try {
@@ -305,7 +367,7 @@ export default function PlayerHud({ nickname, ratingPoints, title, tierLabel, av
     let challengerDelta: number | null = null;
     let targetDelta: number | null = null;
 
-    const ratingAppliedAt = ch?.ratingAppliedAt ?? (ch as any)?.rating_applied_at ?? null;
+    const ratingAppliedAt = data?.ratingAppliedAt ?? (data as any)?.rating_applied_at ?? null;
     const ratingWasApplied = !!ratingAppliedAt;
 
     if (ratingWasApplied && status === "COMPLETED" && (result === "CHALLENGER_WON" || result === "CHALLENGER_LOST")) {

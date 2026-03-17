@@ -6,6 +6,7 @@ import { aoePlayerRoutes } from './aoePlayerRoutes';
 import { adminRoutes } from './adminRoutes';
 import { challengeRoutes } from './challengeRoutes';
 import { adminChallengeRoutes } from './adminChallengeRoutes';
+import historyRoutes from './historyRoutes';
 
 export const apiRoutes = Router();
 
@@ -17,6 +18,7 @@ apiRoutes.use('/v1', aoePlayerRoutes);
 apiRoutes.use('/v1', adminRoutes);
 apiRoutes.use('/v1', challengeRoutes);
 apiRoutes.use('/v1', adminChallengeRoutes);
+apiRoutes.use('/v1', historyRoutes);
 
 // Backward-compatible (current URLs)
 apiRoutes.use(healthRoutes);
@@ -26,3 +28,4 @@ apiRoutes.use(aoePlayerRoutes);
 apiRoutes.use(adminRoutes);
 apiRoutes.use(challengeRoutes);
 apiRoutes.use(adminChallengeRoutes);
+apiRoutes.use(historyRoutes);
