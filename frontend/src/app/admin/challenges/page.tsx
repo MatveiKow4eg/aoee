@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { adminCancelChallenge, adminDeleteChallenges, adminListChallenges, adminResolveChallenge } from "../../../lib/api/challenges";
 
-type Tab = "ACTIVE" | "COMPLETED" | "EXPIRED" | "CANCELLED";
+type Tab = "ACTIVE" | "COMPLETED" | "EXPIRED";
 
 function fmt(dt?: string | null) {
   if (!dt) return "—";
@@ -84,7 +84,7 @@ export default function AdminChallengesPage() {
         </div>
 
         <div style={{ padding: 12, display: "flex", gap: 8, flexWrap: "wrap" }}>
-          {(["ACTIVE", "COMPLETED", "EXPIRED", "CANCELLED"] as Tab[]).map((t) => (
+          {(["ACTIVE", "COMPLETED", "EXPIRED"] as Tab[]).map((t) => (
             <button key={t} onClick={() => setTab(t)} className={`aoe-btn ${tab === t ? "aoe-btn--active" : ""}`}>
               {t}
             </button>
@@ -182,29 +182,7 @@ export default function AdminChallengesPage() {
                               Challenger lost
                             </button>
 
-                            <button
-                              disabled={busy}
-                              onClick={async () => {
-                                if (!confirm("Cancel this challenge?")) return;
-                                setBusyId(ch.id);
-                                try {
-                                  await adminCancelChallenge(ch.id);
-                                  await load(tab);
-                                } finally {
-                                  setBusyId(null);
-                                }
-                              }}
-                              className="aoe-btn"
-                              style={{
-                                opacity: busy ? 0.65 : 1,
-                                cursor: busy ? "not-allowed" : "pointer",
-                                background: "linear-gradient(180deg, rgba(244, 63, 94, 1) 0%, rgba(190, 18, 60, 1) 100%)",
-                                color: "#fff1f2",
-                              }}
-                            >
-                              Cancel
-                            </button>
-                          </div>
+                                                      </div>
                         )}
                       </div>
                     </div>

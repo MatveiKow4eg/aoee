@@ -307,6 +307,25 @@ export default function PlayerHud({ nickname, ratingPoints, title, tierLabel, av
     return { aName, bName, aAvatar, bAvatar, outcome, when, aDelta, bDelta };
   };
 
+  // TEMP DEBUG: existence check for /people/{key}.png to diagnose missing avatars in history.
+  // Kept local to PlayerHud to avoid refactors.
+  const peoplePngExistsCacheRef = React.useRef(new Map<string, boolean>());
+  const checkPeoplePngExists = async (url: string): Promise<boolean> => {
+    try {
+      const cached = peoplePngExistsCacheRef.current.get(url);
+      if (typeof cached === "boolean") return cached;
+
+      // HEAD is enough; Next static files should respond 200/404.
+      const r = await fetch(url, { method: "HEAD" });
+      const ok = r.ok;
+      peoplePngExistsCacheRef.current.set(url, ok);
+      return ok;
+    } catch {
+      // If network fails, don't treat as missing.
+      return true;
+    }
+  };
+
   const Avatar = ({ url, name }: { url: string | null; name: string }) => {
     const initial = (name || "?").trim().slice(0, 1).toUpperCase();
     return (
@@ -1039,6 +1058,59 @@ export default function PlayerHud({ nickname, ratingPoints, title, tierLabel, av
                             .slice(0, historyExpanded ? 200 : 3)
                             .map((ch, idx) => {
                               const vm = challengeVm(ch);
+
+                              // TEMP DEBUG: log only in history modal and only for suspicious/missing avatars.
+                              // Suspicious = derived /people/*.png (may not exist) or empty.
+                              const aUrl = vm.aAvatar;
+                              const bUrl = vm.bAvatar;
+                              const isSuspicious = (u: any) => {
+                                const s = typeof u === "string" ? u.trim() : "";
+                                if (!s) return true;
+                                return s.startsWith("/people/") && s.endsWith(".png");
+                              };
+
+                              if (historyModalOpen && (isSuspicious(aUrl) || isSuspicious(bUrl))) {
+                                // Fire-and-forget async checks; keep logs grouped.
+                                (async () => {
+                                  const challengerUser = ch?.challengerUser ?? null;
+                                  const targetUser = ch?.targetUser ?? null;
+
+                                  const challengerPlayerKey = typeof ch?.challengerPlayerKey === "string" ? ch.challengerPlayerKey.trim() : "";
+                                  const targetPlayerKey = typeof ch?.targetPlayerKey === "string" ? ch.targetPlayerKey.trim() : "";
+
+                                  const mapChallenger = challengerPlayerKey && mapPlayers ? (mapPlayers as any)[challengerPlayerKey] : null;
+                                  const mapTarget = targetPlayerKey && mapPlayers ? (mapPlayers as any)[targetPlayerKey] : null;
+
+                                  const aPeopleExists = typeof aUrl === "string" && aUrl.startsWith("/people/") ? await checkPeoplePngExists(aUrl) : null;
+                                  const bPeopleExists = typeof bUrl === "string" && bUrl.startsWith("/people/") ? await checkPeoplePngExists(bUrl) : null;
+
+                                  // eslint-disable-next-line no-console
+                                  console.groupCollapsed(
+                                    `[history-avatar-debug] ch=${String(ch?.id ?? "?")} idx=${idx} a=${vm.aName} b=${vm.bName}`
+                                  );
+                                  // eslint-disable-next-line no-console
+                                  console.log({
+                                    challengeId: ch?.id ?? null,
+                                    challengerUser_displayName: challengerUser?.displayName ?? null,
+                                    targetUser_displayName: targetUser?.displayName ?? null,
+                                    challengerUser_avatarUrl: challengerUser?.avatarUrl ?? null,
+                                    targetUser_avatarUrl: targetUser?.avatarUrl ?? null,
+                                    challengerPlayerKey: challengerPlayerKey || null,
+                                    targetPlayerKey: targetPlayerKey || null,
+                                    mapPlayers_challenger: mapChallenger,
+                                    mapPlayers_target: mapTarget,
+                                    vm_aAvatar: vm.aAvatar,
+                                    vm_bAvatar: vm.bAvatar,
+                                    vm_aName: vm.aName,
+                                    vm_bName: vm.bName,
+                                    peoplePngExists_a: aPeopleExists,
+                                    peoplePngExists_b: bPeopleExists,
+                                  });
+                                  // eslint-disable-next-line no-console
+                                  console.groupEnd();
+                                })();
+                              }
+
                               const badgeBg =
                                 vm.outcome.tone === "win"
                                   ? "rgba(43,187,115,0.18)"
