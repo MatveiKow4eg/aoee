@@ -322,7 +322,7 @@ model MatchEvent {
   id              String           @id @default(cuid())
   format          MatchEventFormat
   status          MatchEventStatus @default(OPEN)
-  winnerSide      MatchEventSide?
+  winnerSide      MatchEventSide?  @map("winner_side")
 
   createdByUserId String           @map("created_by_user_id")
   resolvedByUserId String?         @map("resolved_by_user_id")
