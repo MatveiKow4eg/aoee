@@ -19,8 +19,119 @@ export type CanChallengeResponse = {
   activeChallengeId: string | null;
 };
 
+const isValidRatingResult = (result: any): result is 'CHALLENGER_WON' | 'CHALLENGER_LOST' => {
+  return result === 'CHALLENGER_WON' || result === 'CHALLENGER_LOST';
+};
+
 export class ChallengeService {
   private readonly mapService = new MapService();
+
+  /**
+   * Apply rating for a resolved challenge.
+   *
+   * Idempotent rules:
+   * - challenge must be COMPLETED
+   * - result must be CHALLENGER_WON/CHALLENGER_LOST
+   * - ratingAppliedAt must be null
+   *
+   * This method is intentionally conservative: if required player keys are missing,
+   * it will NOT apply rating and will return a reason.
+   */
+  private async applyRatingIfNeeded(
+    tx: any,
+    params: { challengeId: string; now: Date; debug?: boolean }
+  ): Promise<{ applied: boolean; reason: string; ratingAppliedAtAfter: Date | null }> {
+    const { challengeId, now, debug } = params;
+
+    const ch = await tx.userChallenge.findUnique({ where: { id: challengeId } });
+    if (!ch) return { applied: false, reason: 'NOT_FOUND', ratingAppliedAtAfter: null };
+
+    if (ch.status !== 'COMPLETED') {
+      return { applied: false, reason: `SKIP_STATUS_${String(ch.status)}`, ratingAppliedAtAfter: ch.ratingAppliedAt ?? null };
+    }
+
+    if (!isValidRatingResult(ch.result)) {
+      return { applied: false, reason: `SKIP_RESULT_${String(ch.result ?? 'NULL')}`, ratingAppliedAtAfter: ch.ratingAppliedAt ?? null };
+    }
+
+    if (ch.ratingAppliedAt) {
+      return { applied: false, reason: 'ALREADY_APPLIED', ratingAppliedAtAfter: ch.ratingAppliedAt };
+    }
+
+    const isChallengerWon = ch.result === 'CHALLENGER_WON';
+
+    const challengerPlayerKey = (ch as any).challengerPlayerKey ? String((ch as any).challengerPlayerKey).trim() : '';
+    const targetPlayerKey = (ch as any).targetPlayerKey ? String((ch as any).targetPlayerKey).trim() : '';
+
+    const winnerPlayerKey = isChallengerWon ? challengerPlayerKey : targetPlayerKey;
+    const loserPlayerKey = isChallengerWon ? targetPlayerKey : challengerPlayerKey;
+
+    if (!winnerPlayerKey || !loserPlayerKey) {
+      return { applied: false, reason: 'MISSING_PLAYER_KEYS', ratingAppliedAtAfter: null };
+    }
+
+    if (winnerPlayerKey === loserPlayerKey) {
+      return { applied: false, reason: 'SAME_PLAYER_KEYS', ratingAppliedAtAfter: null };
+    }
+
+    // Ensure PlayerProfile exists for both keys
+    await (tx as any).playerProfile.upsert({
+      where: { playerKey: winnerPlayerKey },
+      create: { playerKey: winnerPlayerKey },
+      update: {},
+    });
+    await (tx as any).playerProfile.upsert({
+      where: { playerKey: loserPlayerKey },
+      create: { playerKey: loserPlayerKey },
+      update: {},
+    });
+
+    await (tx as any).playerProfile.update({
+      where: { playerKey: winnerPlayerKey },
+      data: { ratingPoints: { increment: CHALLENGE_WIN_POINTS } },
+    });
+    await (tx as any).playerProfile.update({
+      where: { playerKey: loserPlayerKey },
+      data: { ratingPoints: { increment: CHALLENGE_LOSS_POINTS } },
+    });
+
+    await (tx as any).playerRatingEvent.createMany({
+      data: [
+        {
+          playerKey: winnerPlayerKey,
+          challengeId: challengeId,
+          delta: CHALLENGE_WIN_POINTS,
+          reason: 'CHALLENGE_WIN',
+          createdAt: now,
+        },
+        {
+          playerKey: loserPlayerKey,
+          challengeId: challengeId,
+          delta: CHALLENGE_LOSS_POINTS,
+          reason: 'CHALLENGE_LOSS',
+          createdAt: now,
+        },
+      ],
+    });
+
+    // Mark as processed to prevent double-application.
+    const updated = await tx.userChallenge.update({
+      where: { id: challengeId },
+      data: { ratingAppliedAt: now },
+    });
+
+    if (debug) {
+      console.log('[challenge][applyRating] applied', {
+        challengeId,
+        winnerPlayerKey,
+        loserPlayerKey,
+        ratingAppliedAt: updated.ratingAppliedAt ? updated.ratingAppliedAt.toISOString() : null,
+      });
+    }
+
+    return { applied: true, reason: 'APPLIED', ratingAppliedAtAfter: updated.ratingAppliedAt ?? null };
+  }
+
   /**
    * Lazy expiry: any read path can call this to mark expired challenges.
    * By default, expiry also triggers challenger cooldown.
@@ -461,12 +572,12 @@ export class ChallengeService {
 
     return rows.map((ch: any) => {
       const challengerKey =
-        (typeof ch?.challengerPlayerKey === 'string' && ch.challengerPlayerKey.trim())
+        typeof ch?.challengerPlayerKey === 'string' && ch.challengerPlayerKey.trim()
           ? ch.challengerPlayerKey.trim()
           : userIdToPlayerKey.get(String(ch?.challengerUser?.id ?? ch?.challengerUserId ?? '').trim()) ?? null;
 
       const targetKey =
-        (typeof ch?.targetPlayerKey === 'string' && ch.targetPlayerKey.trim())
+        typeof ch?.targetPlayerKey === 'string' && ch.targetPlayerKey.trim()
           ? ch.targetPlayerKey.trim()
           : userIdToPlayerKey.get(String(ch?.targetUser?.id ?? ch?.targetUserId ?? '').trim()) ?? null;
 
@@ -500,10 +611,14 @@ export class ChallengeService {
   async resolveChallenge(params: { challengeId: string; adminUserId: string; result: ChallengeResult; notes?: string | null }, now = new Date()) {
     const { challengeId, adminUserId, result, notes } = params;
 
+    const debug = String(process.env.DEBUG_CHALLENGES || '').trim() === '1';
+
     return prisma.$transaction(async (tx) => {
       // expiry inside tx (simple / safe)
       const challenge = await tx.userChallenge.findUnique({ where: { id: challengeId } });
       if (!challenge) throw new HttpError(404, 'NOT_FOUND', 'Challenge not found');
+
+      const oldStatus = String(challenge.status);
 
       if (challenge.status !== 'ACTIVE') {
         throw new HttpError(400, 'INVALID_STATUS', `Challenge is not ACTIVE (status=${challenge.status})`);
@@ -522,6 +637,8 @@ export class ChallengeService {
       const winnerPlayerKey = isChallengerWon ? challengerPlayerKey : targetPlayerKey;
       const loserPlayerKey = isChallengerWon ? targetPlayerKey : challengerPlayerKey;
 
+      const ratingAppliedAtBefore = challenge.ratingAppliedAt ? new Date(challenge.ratingAppliedAt) : null;
+
       // 1) Resolve the challenge first (source of truth for winner/loser)
       const updated = await tx.userChallenge.update({
         where: { id: challengeId },
@@ -533,7 +650,7 @@ export class ChallengeService {
           winnerUserId,
           loserUserId,
           // Cast to any to avoid TS errors when Prisma client types are out of sync with the latest schema.
-          ...( {
+          ...({
             winnerPlayerKey: winnerPlayerKey || null,
             loserPlayerKey: loserPlayerKey || null,
           } as any),
@@ -541,59 +658,24 @@ export class ChallengeService {
         } as any,
       });
 
-      // 2) Apply PLAYER rating points (ONLY once per challenge)
-      // Rules:
-      // - Do NOT apply if result isn't a win/loss (DRAW/NO_SHOW)
-      // - Do NOT apply twice (ratingAppliedAt guard)
-      // - Apply to BOTH sides by playerKey (even if targetUserId is null)
-      if (!challenge.ratingAppliedAt && (result === 'CHALLENGER_WON' || result === 'CHALLENGER_LOST')) {
-        if (winnerPlayerKey && loserPlayerKey && winnerPlayerKey !== loserPlayerKey) {
-          // Ensure PlayerProfile exists for both keys
-          await (tx as any).playerProfile.upsert({
-            where: { playerKey: winnerPlayerKey },
-            create: { playerKey: winnerPlayerKey },
-            update: {},
-          });
-          await (tx as any).playerProfile.upsert({
-            where: { playerKey: loserPlayerKey },
-            create: { playerKey: loserPlayerKey },
-            update: {},
-          });
+      // 2) Apply rating via a single idempotent helper
+      const applyRes = await this.applyRatingIfNeeded(tx, { challengeId, now, debug });
 
-          await (tx as any).playerProfile.update({
-            where: { playerKey: winnerPlayerKey },
-            data: { ratingPoints: { increment: CHALLENGE_WIN_POINTS } },
-          });
-          await (tx as any).playerProfile.update({
-            where: { playerKey: loserPlayerKey },
-            data: { ratingPoints: { increment: CHALLENGE_LOSS_POINTS } },
-          });
+      const ratingAppliedAtAfter = applyRes.ratingAppliedAtAfter;
 
-          await (tx as any).playerRatingEvent.createMany({
-            data: [
-              {
-                playerKey: winnerPlayerKey,
-                challengeId: challengeId,
-                delta: CHALLENGE_WIN_POINTS,
-                reason: 'CHALLENGE_WIN',
-                createdAt: now,
-              },
-              {
-                playerKey: loserPlayerKey,
-                challengeId: challengeId,
-                delta: CHALLENGE_LOSS_POINTS,
-                reason: 'CHALLENGE_LOSS',
-                createdAt: now,
-              },
-            ],
-          });
-
-          // Mark as processed to prevent double-application.
-          await tx.userChallenge.update({
-            where: { id: challengeId },
-            data: { ratingAppliedAt: now },
-          });
-        }
+      // TEMP debug log (required by task)
+      if (debug) {
+        console.log('[challenge][finalize]', {
+          challengeId,
+          oldStatus,
+          newStatus: 'COMPLETED',
+          result,
+          ratingAppliedAtBefore: ratingAppliedAtBefore ? ratingAppliedAtBefore.toISOString() : null,
+          applyRatingCalled: true,
+          applyRatingApplied: applyRes.applied,
+          applyRatingReason: applyRes.reason,
+          ratingAppliedAtAfter: ratingAppliedAtAfter ? ratingAppliedAtAfter.toISOString() : null,
+        });
       }
 
       const cooldownUntil = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
@@ -680,6 +762,20 @@ export class ChallengeService {
         userRatingEventsDeleted: userRatingEventsDeleted.count ?? 0,
         playerRatingEventsDeleted: playerRatingEventsDeleted.count ?? 0,
       };
+    });
+  }
+
+  /**
+   * Backfill utility: apply rating for a single challenge id.
+   *
+   * This is intentionally exposed as a public method so scripts/admin utilities
+   * can reuse the same idempotent logic.
+   */
+  async backfillApplyRatingForChallenge(challengeId: string, now = new Date()) {
+    const debug = String(process.env.DEBUG_CHALLENGES || '').trim() === '1';
+
+    return prisma.$transaction(async (tx) => {
+      return this.applyRatingIfNeeded(tx, { challengeId, now, debug });
     });
   }
 }
