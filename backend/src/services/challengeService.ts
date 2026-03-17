@@ -668,6 +668,27 @@ export class ChallengeService {
       // ignore mapping failures; we'll fall back to null avatarUrl
     }
 
+    // Load PlayerProfile data for any playerKeys we can resolve.
+    const keys = Array.from(
+      new Set(
+        rows
+          .flatMap((ch: any) => [
+            typeof ch?.challengerPlayerKey === 'string' ? ch.challengerPlayerKey.trim() : '',
+            typeof ch?.targetPlayerKey === 'string' ? ch.targetPlayerKey.trim() : '',
+          ])
+          .filter(Boolean)
+      )
+    ).slice(0, 800);
+
+    const profiles = keys.length
+      ? await (prisma as any).playerProfile.findMany({
+          where: { playerKey: { in: keys } },
+          select: { playerKey: true, ratingPoints: true, displayName: true, claimedByUserId: true },
+        })
+      : [];
+
+    const profileByKey = new Map(profiles.map((p: any) => [String(p.playerKey).trim(), p] as const));
+
     return rows.map((ch: any) => {
       const challengerKey =
         typeof ch?.challengerPlayerKey === 'string' && ch.challengerPlayerKey.trim()
@@ -682,17 +703,28 @@ export class ChallengeService {
       const challengerAvatar = playerKeyToPeopleUrl(challengerKey);
       const targetAvatar = playerKeyToPeopleUrl(targetKey);
 
+      const challengerProfile = challengerKey ? profileByKey.get(challengerKey) ?? null : null;
+      const targetProfile = targetKey ? profileByKey.get(targetKey) ?? null : null;
+
+      const challengerDisplayName =
+        (challengerProfile?.displayName ? String(challengerProfile.displayName).trim() : '') ||
+        (challengerKey ? playerKeyToName.get(challengerKey) ?? String(challengerKey) : null);
+
+      const targetDisplayName =
+        (targetProfile?.displayName ? String(targetProfile.displayName).trim() : '') ||
+        (targetKey ? playerKeyToName.get(targetKey) ?? String(targetKey) : null);
+
       // Build minimal user objects when original relation is null but we have a playerKey
       const challengerUserObj = ch.challengerUser
         ? { ...ch.challengerUser, avatarUrl: challengerAvatar }
         : challengerKey
-          ? { id: null, displayName: playerKeyToName.get(challengerKey) ?? String(challengerKey), avatarUrl: challengerAvatar }
+          ? { id: null, displayName: challengerDisplayName, avatarUrl: challengerAvatar }
           : null;
 
       const targetUserObj = ch.targetUser
         ? { ...ch.targetUser, avatarUrl: targetAvatar }
         : targetKey
-          ? { id: null, displayName: playerKeyToName.get(targetKey) ?? String(targetKey), avatarUrl: targetAvatar }
+          ? { id: null, displayName: targetDisplayName, avatarUrl: targetAvatar }
           : null;
 
       return {
@@ -702,6 +734,25 @@ export class ChallengeService {
         // Also expose best-effort keys for frontend history rendering.
         challengerPlayerKey: challengerKey ?? ch?.challengerPlayerKey ?? null,
         targetPlayerKey: targetKey ?? ch?.targetPlayerKey ?? null,
+        // OR-identity: expose profile-based rating/claim info for UI cards.
+        challengerProfile: challengerKey
+          ? {
+              playerKey: challengerKey,
+              displayName: challengerDisplayName,
+              avatarUrl: challengerAvatar,
+              ratingPoints: typeof challengerProfile?.ratingPoints === 'number' ? challengerProfile.ratingPoints : 0,
+              claimedByUserId: challengerProfile?.claimedByUserId ? String(challengerProfile.claimedByUserId).trim() : null,
+            }
+          : null,
+        targetProfile: targetKey
+          ? {
+              playerKey: targetKey,
+              displayName: targetDisplayName,
+              avatarUrl: targetAvatar,
+              ratingPoints: typeof targetProfile?.ratingPoints === 'number' ? targetProfile.ratingPoints : 0,
+              claimedByUserId: targetProfile?.claimedByUserId ? String(targetProfile.claimedByUserId).trim() : null,
+            }
+          : null,
       };
     });
   }

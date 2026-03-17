@@ -158,7 +158,10 @@ export class AoePlayerService {
         }
       }
     } catch (e: any) {
-      // Do not break claim flow; log and continue.
+      // If PlayerProfile is claimed by another user, surface conflict.
+      if (e instanceof HttpError && (e as any)?.status === 409) throw e;
+
+      // Do not break claim flow on non-conflict errors; log and continue.
       console.warn('[claim][playerProfile] failed', { aoeProfileId, reason: e?.message ? String(e.message) : 'unknown_error' });
     }
 

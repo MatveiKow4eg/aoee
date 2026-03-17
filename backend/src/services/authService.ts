@@ -107,12 +107,50 @@ export class AuthService {
 
     const steamAvatarUrl = await this.repo.getSteamAvatarUrlByUserId(session.user.id);
 
+    // OR-identity: authoritative rating is stored on PlayerProfile (playerKey-based).
+    // If user has a claimed roster player, try to resolve playerKey and read ratingPoints from PlayerProfile.
+    let authoritativeRatingPoints: number | null = null;
+    try {
+      const aoeProfileId = claimed?.aoeProfileId ? String(claimed.aoeProfileId).trim() : '';
+      if (aoeProfileId) {
+        const { prisma } = await import('../db/prisma');
+        const map = await prisma.mapState.findUnique({ where: { slug: 'default' }, select: { id: true } });
+        if (map) {
+          const all = await prisma.mapPlayer.findMany({
+            where: { mapStateId: map.id },
+            select: { playerKey: true, extraJson: true },
+          });
+
+          let playerKey: string | null = null;
+          for (const row of all) {
+            const extra = (row?.extraJson ?? {}) as any;
+            const rowAoe = String((extra?.aoeProfileId ?? extra?.insightsUserId ?? '')).trim();
+            if (rowAoe && rowAoe === aoeProfileId) {
+              playerKey = String(row.playerKey).trim();
+              break;
+            }
+          }
+
+          if (playerKey) {
+            const prof = await (prisma as any).playerProfile.findUnique({
+              where: { playerKey },
+              select: { ratingPoints: true },
+            });
+            if (prof && typeof prof.ratingPoints === 'number') authoritativeRatingPoints = prof.ratingPoints;
+          }
+        }
+      }
+    } catch {
+      // ignore: never break /me
+    }
+
     return {
       user: this.toPublicUser(session.user, claimed, {
         steamConnected,
         providers,
         avatarUrl: steamAvatarUrl,
-      }),
+        authoritativeRatingPoints,
+      } as any),
     };
   }
 
@@ -131,7 +169,7 @@ export class AuthService {
   private toPublicUser(
     user: any,
     claimed?: any | null,
-    extra?: { steamConnected?: boolean; providers?: string[]; avatarUrl?: string | null },
+    extra?: { steamConnected?: boolean; providers?: string[]; avatarUrl?: string | null; authoritativeRatingPoints?: number | null },
   ): PublicUser {
     return {
       id: user.id,
@@ -140,8 +178,13 @@ export class AuthService {
       role: user.role,
 
       // OR-identity model: rating lives on PlayerProfile (playerKey-based), not on User.
-      // Keep this field for backward compatibility, but do not treat it as authoritative.
-      ratingPoints: typeof user?.ratingPoints === 'number' ? user.ratingPoints : 0,
+      // If we could resolve a claimed PlayerProfile rating, return it here.
+      ratingPoints:
+        typeof extra?.authoritativeRatingPoints === 'number'
+          ? extra.authoritativeRatingPoints
+          : typeof user?.ratingPoints === 'number'
+            ? user.ratingPoints
+            : 0,
 
       steamConnected: extra?.steamConnected ?? false,
       providers: extra?.providers ?? [],
